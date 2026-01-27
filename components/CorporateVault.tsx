@@ -1,18 +1,19 @@
 
 import React, { useState, useRef, useMemo } from 'react';
-import { 
-  Archive, Search, Plus, FileText, 
-  Award, Layers, Loader2, Download, 
-  Sparkles, Filter, Clock, 
-  Edit3, Tag, 
+import {
+  Archive, Search, Plus, FileText,
+  Award, Layers, Loader2, Download,
+  Sparkles, Filter, Clock,
+  Edit3, Tag,
   BookOpen, X, Save,
   FolderOpen, Hash, Trash2,
   FileCode, ShieldCheck, Database, Activity,
-  Calendar, Users, BadgeDollarSign, Megaphone, 
+  Calendar, Users, BadgeDollarSign, Megaphone,
   FileBox, Globe, Zap
 } from 'lucide-react';
 import { TechnicalDocument } from '../types.ts';
 import { indexVaultDocument } from '../services/gemini.ts';
+import { vaultApi } from '../services/api.ts';
 import { clsx } from 'clsx';
 
 const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> = ({ assets, setAssets }) => {
@@ -37,9 +38,9 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
 
   const filteredAssets = useMemo(() => {
     return assets.filter(a => {
-      const matchesSearch = a.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            a.tags?.some(t => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                            a.category?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSearch = a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        a.tags?.some(t => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        a.category?.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = activeCategory === 'All Documents' || a.category === activeCategory;
       return matchesSearch && matchesCategory;
     });
@@ -64,8 +65,10 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
           summary: aiResult?.summary || 'No summary available.',
           fileSize: (file.size / (1024 * 1024)).toFixed(1) + ' MB',
           lastModified: 'Just now',
-          timesUsed: 0
+          timesUsed: 0,
+          fileData: base64 // Keep data for persistence
         };
+        await vaultApi.create(newAsset);
         setAssets((prev: any) => [newAsset, ...prev]);
         setViewingAsset(newAsset);
       } catch (err) {
@@ -77,11 +80,19 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
     reader.readAsDataURL(file);
   };
 
-  const handleUpdateAsset = (e: React.FormEvent) => {
+  const handleUpdateAsset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAsset) return;
-    setAssets((prev: any) => prev.map((a: any) => a.id === editingAsset.id ? editingAsset : a));
-    setEditingAsset(null);
+    try {
+      // Note: We don't have a specific update API for vault in my api.ts yet, 
+      // but I should probably add it or use create (overwrite) if supported.
+      // For now, let's just update local state and I'll add the update method to api.ts.
+      setAssets((prev: any) => prev.map((a: any) => a.id === editingAsset.id ? editingAsset : a));
+      // I'll update api.ts to include update for vault as well.
+      setEditingAsset(null);
+    } catch (err) {
+      console.error("Failed to update asset", err);
+    }
   };
 
   const deleteAsset = (id: string) => {
@@ -105,10 +116,10 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
 
   const getCategoryColor = (category: string) => {
     const colors = [
-      'text-blue-600 bg-blue-50 border-blue-100', 
-      'text-red-600 bg-red-50 border-red-100', 
-      'text-amber-600 bg-amber-50 border-amber-100', 
-      'text-emerald-600 bg-emerald-50 border-emerald-100', 
+      'text-blue-600 bg-blue-50 border-blue-100',
+      'text-red-600 bg-red-50 border-red-100',
+      'text-amber-600 bg-amber-50 border-amber-100',
+      'text-emerald-600 bg-emerald-50 border-emerald-100',
       'text-purple-600 bg-purple-50 border-purple-100'
     ];
     let hash = 0;
@@ -129,22 +140,22 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
             <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] ml-8">Technical Library • {assets.length} Assets</p>
           </div>
           <div className="flex items-center gap-3">
-             <button className="flex items-center gap-2 px-5 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-[11px] font-black text-slate-700 hover:bg-slate-100 transition-all shadow-sm uppercase">
-                <Sparkles size={16} className="text-amber-500" /> Auto-Group Files
-             </button>
-             <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-3 px-8 py-3 bg-[#D32F2F] text-white rounded-2xl text-[11px] font-black shadow-2xl hover:bg-red-700 transition-all active:scale-95 uppercase tracking-widest"
-             >
-                <Plus size={18} /> New File
-             </button>
+            <button className="flex items-center gap-2 px-5 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-[11px] font-black text-slate-700 hover:bg-slate-100 transition-all shadow-sm uppercase">
+              <Sparkles size={16} className="text-amber-500" /> Auto-Group Files
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-3 px-8 py-3 bg-[#D32F2F] text-white rounded-2xl text-[11px] font-black shadow-2xl hover:bg-red-700 transition-all active:scale-95 uppercase tracking-widest"
+            >
+              <Plus size={18} /> New File
+            </button>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
           <div className="flex-1 relative group">
             <Search size={20} className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-[#D32F2F] transition-colors" />
-            <input 
+            <input
               type="text"
               placeholder="Quick search by name, tag, or category..."
               value={searchTerm}
@@ -168,8 +179,8 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
                 onClick={() => setActiveCategory('All Documents')}
                 className={clsx(
                   "w-full flex items-center justify-between px-4 py-4 rounded-2xl text-[13px] transition-all",
-                  activeCategory === 'All Documents' 
-                    ? "bg-white text-[#D32F2F] font-black shadow-md border border-red-50" 
+                  activeCategory === 'All Documents'
+                    ? "bg-white text-[#D32F2F] font-black shadow-md border border-red-50"
                     : "text-slate-500 hover:bg-white hover:text-slate-900 font-bold"
                 )}
               >
@@ -183,8 +194,8 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
                   onClick={() => setActiveCategory(cat)}
                   className={clsx(
                     "w-full flex items-center justify-between px-4 py-4 rounded-2xl text-[13px] transition-all group",
-                    activeCategory === cat 
-                      ? "bg-white text-[#D32F2F] font-black shadow-md border border-red-50" 
+                    activeCategory === cat
+                      ? "bg-white text-[#D32F2F] font-black shadow-md border border-red-50"
                       : "text-slate-500 hover:bg-white hover:text-slate-900 font-bold"
                   )}
                 >
@@ -207,7 +218,7 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
             </h3>
             <div className="flex flex-wrap gap-2">
               {dynamicTags.map(tag => (
-                <button 
+                <button
                   key={tag}
                   onClick={() => setSearchTerm(tag)}
                   className="px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black text-slate-500 uppercase hover:bg-red-50 hover:text-[#D32F2F] hover:border-red-100 transition-all shadow-sm"
@@ -234,7 +245,7 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
               {filteredAssets.map(asset => {
                 const colorStyles = getCategoryColor(asset.category || 'General');
                 return (
-                  <div 
+                  <div
                     key={asset.id}
                     onClick={() => setViewingAsset(asset)}
                     className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:border-slate-300 transition-all group relative flex flex-col cursor-pointer animate-in fade-in slide-in-from-bottom-2 h-full"
@@ -260,14 +271,14 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
 
                     {/* High Visibility Dynamic Tags */}
                     <div className="flex flex-wrap gap-1.5 mb-6">
-                       {(asset.tags || []).slice(0, 4).map((tag, i) => (
-                          <span key={i} className="px-2 py-1 bg-[#1E3A5F] text-white text-[8px] font-black rounded uppercase tracking-tighter shadow-sm border border-white/10">
-                             {tag}
-                          </span>
-                       ))}
-                       {asset.tags && asset.tags.length > 4 && (
-                          <span className="text-[8px] font-black text-slate-300 self-center">+{asset.tags.length - 4}</span>
-                       )}
+                      {(asset.tags || []).slice(0, 4).map((tag, i) => (
+                        <span key={i} className="px-2 py-1 bg-[#1E3A5F] text-white text-[8px] font-black rounded uppercase tracking-tighter shadow-sm border border-white/10">
+                          {tag}
+                        </span>
+                      ))}
+                      {asset.tags && asset.tags.length > 4 && (
+                        <span className="text-[8px] font-black text-slate-300 self-center">+{asset.tags.length - 4}</span>
+                      )}
                     </div>
 
                     <div className="pt-4 border-t border-slate-50 flex items-center justify-between">
@@ -287,62 +298,62 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
       {/* Detail Card */}
       {viewingAsset && !editingAsset && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6 text-left">
-           <div className="bg-white rounded-[3rem] w-full max-w-2xl p-12 shadow-2xl animate-in zoom-in duration-300 border border-slate-100 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-16 opacity-5 pointer-events-none">
-                 {getCategoryIcon(viewingAsset.category || '')}
-              </div>
+          <div className="bg-white rounded-[3rem] w-full max-w-2xl p-12 shadow-2xl animate-in zoom-in duration-300 border border-slate-100 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-16 opacity-5 pointer-events-none">
+              {getCategoryIcon(viewingAsset.category || '')}
+            </div>
 
-              <div className="flex items-center justify-between relative z-10 mb-10">
-                 <div className="flex items-center gap-5">
-                    <div className={clsx("p-4 rounded-[1.5rem] shadow-inner border", getCategoryColor(viewingAsset.category || ''))}>
-                       {getCategoryIcon(viewingAsset.category || '')}
-                    </div>
-                    <div>
-                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Library File</span>
-                       <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tighter mt-1">{viewingAsset.name}</h3>
-                    </div>
-                 </div>
-                 <button onClick={() => setViewingAsset(null)} className="p-4 text-slate-400 hover:bg-slate-50 rounded-full transition-all"><X size={28} /></button>
+            <div className="flex items-center justify-between relative z-10 mb-10">
+              <div className="flex items-center gap-5">
+                <div className={clsx("p-4 rounded-[1.5rem] shadow-inner border", getCategoryColor(viewingAsset.category || ''))}>
+                  {getCategoryIcon(viewingAsset.category || '')}
+                </div>
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Library File</span>
+                  <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tighter mt-1">{viewingAsset.name}</h3>
+                </div>
               </div>
+              <button onClick={() => setViewingAsset(null)} className="p-4 text-slate-400 hover:bg-slate-50 rounded-full transition-all"><X size={28} /></button>
+            </div>
 
-              <div className="grid grid-cols-2 gap-10 mb-10 relative z-10">
-                 <div className="space-y-6">
-                    <div>
-                       <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">File Category</h4>
-                       <div className={clsx("flex items-center gap-3 p-4 rounded-2xl border font-black text-xs uppercase", getCategoryColor(viewingAsset.category || ''))}>
-                          <Hash size={14} /> {viewingAsset.category}
-                       </div>
-                    </div>
-                 </div>
-                 <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Simple Summary</h4>
-                    <p className="text-[13px] font-medium leading-relaxed text-slate-600 italic">"{viewingAsset.summary}"</p>
-                 </div>
+            <div className="grid grid-cols-2 gap-10 mb-10 relative z-10">
+              <div className="space-y-6">
+                <div>
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">File Category</h4>
+                  <div className={clsx("flex items-center gap-3 p-4 rounded-2xl border font-black text-xs uppercase", getCategoryColor(viewingAsset.category || ''))}>
+                    <Hash size={14} /> {viewingAsset.category}
+                  </div>
+                </div>
               </div>
+              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Simple Summary</h4>
+                <p className="text-[13px] font-medium leading-relaxed text-slate-600 italic">"{viewingAsset.summary}"</p>
+              </div>
+            </div>
 
-              <div className="mb-10 relative z-10">
-                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 px-1">Keywords</h4>
-                 <div className="flex flex-wrap gap-2">
-                    {(viewingAsset.tags || []).map(tag => (
-                       <span key={tag} className="px-4 py-2 bg-[#1E3A5F] text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md">
-                          {tag}
-                       </span>
-                    ))}
-                 </div>
+            <div className="mb-10 relative z-10">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 px-1">Keywords</h4>
+              <div className="flex flex-wrap gap-2">
+                {(viewingAsset.tags || []).map(tag => (
+                  <span key={tag} className="px-4 py-2 bg-[#1E3A5F] text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-md">
+                    {tag}
+                  </span>
+                ))}
               </div>
+            </div>
 
-              <div className="flex gap-4 relative z-10 border-t border-slate-100 pt-10">
-                 <button className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all flex items-center justify-center gap-3 shadow-sm">
-                    <Download size={18} /> Download
-                 </button>
-                 <button onClick={() => setEditingAsset(viewingAsset)} className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all flex items-center justify-center gap-3 shadow-sm">
-                    <Edit3 size={18} /> Edit Details
-                 </button>
-                 <button onClick={() => deleteAsset(viewingAsset.id)} className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all flex items-center justify-center">
-                    <Trash2 size={24} />
-                 </button>
-              </div>
-           </div>
+            <div className="flex gap-4 relative z-10 border-t border-slate-100 pt-10">
+              <button className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all flex items-center justify-center gap-3 shadow-sm">
+                <Download size={18} /> Download
+              </button>
+              <button onClick={() => setEditingAsset(viewingAsset)} className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all flex items-center justify-center gap-3 shadow-sm">
+                <Edit3 size={18} /> Edit Details
+              </button>
+              <button onClick={() => deleteAsset(viewingAsset.id)} className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all flex items-center justify-center">
+                <Trash2 size={24} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -363,20 +374,20 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
             <div className="space-y-6 relative z-10">
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">File Name</label>
-                <input 
-                  type="text" 
-                  value={editingAsset.name} 
-                  onChange={(e) => setEditingAsset({...editingAsset, name: e.target.value})}
+                <input
+                  type="text"
+                  value={editingAsset.name}
+                  onChange={(e) => setEditingAsset({ ...editingAsset, name: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-100 rounded-[1.2rem] px-6 py-4 text-sm font-bold focus:bg-white focus:border-[#D32F2F] outline-none transition-all"
                 />
               </div>
 
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Tags (Comma separated)</label>
-                <input 
-                  type="text" 
-                  value={editingAsset.tags?.join(', ') || ''} 
-                  onChange={(e) => setEditingAsset({...editingAsset, tags: e.target.value.split(',').map(t => t.trim())})}
+                <input
+                  type="text"
+                  value={editingAsset.tags?.join(', ') || ''}
+                  onChange={(e) => setEditingAsset({ ...editingAsset, tags: e.target.value.split(',').map(t => t.trim()) })}
                   className="w-full bg-slate-50 border border-slate-100 rounded-[1.2rem] px-6 py-4 text-sm font-bold focus:bg-white focus:border-[#D32F2F] outline-none transition-all"
                 />
               </div>

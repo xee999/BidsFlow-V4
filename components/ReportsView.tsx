@@ -1,10 +1,10 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { 
-  Trophy, 
-  Target, 
-  Ban, 
-  Clock, 
-  CheckCircle2, 
+import {
+  Trophy,
+  Target,
+  Ban,
+  Clock,
+  CheckCircle2,
   ShieldAlert,
   History,
   Calendar,
@@ -30,12 +30,13 @@ import { BidRecord, BidStatus, BidStage } from '../types.ts';
 import { STAGE_ICONS, SOLUTION_OPTIONS } from '../constants.tsx';
 import { analyzeNoBidReasons } from '../services/gemini.ts';
 import { clsx } from 'clsx';
+import BidTimeTrackerView from './BidTimeTrackerView.tsx';
 
 interface ReportsViewProps {
   bids: BidRecord[];
 }
 
-const STAGE_COLORS: Record<string, string> = {
+export const STAGE_COLORS: Record<string, string> = {
   [BidStage.INTAKE]: 'bg-slate-400',
   [BidStage.QUALIFICATION]: 'bg-amber-400',
   [BidStage.SOLUTIONING]: 'bg-sky-500',
@@ -51,32 +52,34 @@ interface NoBidCategory {
 }
 
 const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'velocity' | 'no-bid'>('overview');
-  
-  // Velocity Filtering State
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'velocity' | 'time-tracker' | 'no-bid'>('overview');
+
+  // Filters State
   const [filterStatus, setFilterStatus] = useState<BidStatus | 'All'>('All');
   const [filterStage, setFilterStage] = useState<BidStage | 'All'>('All');
   const [filterSolution, setFilterSolution] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [quickHorizon, setQuickHorizon] = useState<'All' | 'This Week' | 'This Month'>('All');
+  const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
 
   // No-Bid Intelligence State
   const [isAnalyzingNoBids, setIsAnalyzingNoBids] = useState(false);
   const [noBidCategories, setNoBidCategories] = useState<NoBidCategory[]>([]);
 
-  const noBidProjects = useMemo(() => 
+  const noBidProjects = useMemo(() =>
     bids.filter(b => b.status === BidStatus.NO_BID && b.noBidReason),
-  [bids]);
+    [bids]);
 
   const handleRunNoBidAnalysis = async () => {
     if (noBidProjects.length === 0) return;
-    
+
     setIsAnalyzingNoBids(true);
     const data = noBidProjects.map(p => ({
       projectName: p.projectName,
       customerName: p.customerName,
       reason: p.noBidReason || 'No reason provided'
     }));
-    
+
     const result = await analyzeNoBidReasons(data);
     if (result && result.categories) {
       setNoBidCategories(result.categories);
@@ -94,7 +97,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
 
     const totalValue = bids.reduce((acc, b) => acc + (b.estimatedValue || 0), 0);
     const wonValue = won.reduce((acc, b) => acc + (b.estimatedValue || 0), 0);
-    
+
     return {
       total: bids.length,
       won: { count: won.length, percent: Math.round((won.length / total) * 100), value: wonValue },
@@ -108,16 +111,16 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
 
   const velocityInsights = useMemo(() => {
     if (bids.length === 0) return null;
-    
+
     const submittedBids = bids.filter(b => b.status !== BidStatus.ACTIVE);
-    const avgCycle = submittedBids.length > 0 
+    const avgCycle = submittedBids.length > 0
       ? submittedBids.reduce((acc: number, b: BidRecord) => {
-          const start = b.stageHistory?.[0]?.timestamp || b.receivedDate;
-          const end = b.submissionDate || new Date().toISOString();
-          const s = new Date(start);
-          const e = new Date(end);
-          return acc + Math.ceil(Math.abs(e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24));
-        }, 0) / submittedBids.length
+        const start = b.stageHistory?.[0]?.timestamp || b.receivedDate;
+        const end = b.submissionDate || new Date().toISOString();
+        const s = new Date(start);
+        const e = new Date(end);
+        return acc + Math.ceil(Math.abs(e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24));
+      }, 0) / submittedBids.length
       : 0;
 
     // Detect bottleneck stage
@@ -145,12 +148,36 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
     return bids.filter(b => {
       const matchesStatus = filterStatus === 'All' || b.status === filterStatus;
       const matchesStage = filterStage === 'All' || b.currentStage === filterStage;
-      const matchesSolution = filterSolution === 'All' || b.requiredSolutions.includes(filterSolution);
-      const matchesSearch = b.projectName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            b.customerName.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesStatus && matchesStage && matchesSearch && matchesSolution;
+      const matchesSolution = filterSolution === 'All' || (b.requiredSolutions || []).includes(filterSolution);
+      const matchesSearch = b.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        b.customerName.toLowerCase().includes(searchQuery.toLowerCase());
+
+      // Date Filters
+      let matchesRange = true;
+      if (dateRange.start || dateRange.end) {
+        const bidDate = new Date(b.deadline);
+        if (dateRange.start) matchesRange = matchesRange && bidDate >= new Date(dateRange.start);
+        if (dateRange.end) matchesRange = matchesRange && bidDate <= new Date(dateRange.end);
+      }
+
+      // Quick Horizon
+      if (quickHorizon !== 'All') {
+        const now = new Date();
+        const bidDate = new Date(b.deadline);
+        if (quickHorizon === 'This Week') {
+          const nextWeek = new Date();
+          nextWeek.setDate(now.getDate() + 7);
+          matchesRange = matchesRange && bidDate >= now && bidDate <= nextWeek;
+        } else if (quickHorizon === 'This Month') {
+          const nextMonth = new Date();
+          nextMonth.setMonth(now.getMonth() + 1);
+          matchesRange = matchesRange && bidDate >= now && bidDate <= nextMonth;
+        }
+      }
+
+      return matchesStatus && matchesStage && matchesSearch && matchesSolution && matchesRange;
     });
-  }, [bids, filterStatus, filterStage, searchQuery, filterSolution]);
+  }, [bids, filterStatus, filterStage, searchQuery, filterSolution, quickHorizon, dateRange]);
 
   const getDaysBetween = (start: string, end: string) => {
     const s = new Date(start);
@@ -177,9 +204,9 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
           <h1 className="text-4xl font-black text-slate-900 tracking-tight">Intelligence Studio</h1>
           <p className="text-slate-500 mt-1 font-medium">Strategic insights and performance tracking for Jazz Business</p>
         </div>
-        
+
         <div className="flex p-1.5 bg-white border border-slate-200 rounded-[2rem] shadow-sm">
-          <button 
+          <button
             onClick={() => setActiveSubTab('overview')}
             className={clsx(
               "flex items-center gap-2 px-6 py-3 rounded-[1.5rem] text-xs font-black uppercase tracking-widest transition-all",
@@ -188,7 +215,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
           >
             <BarChart3 size={16} /> Overview
           </button>
-          <button 
+          <button
             onClick={() => setActiveSubTab('velocity')}
             className={clsx(
               "flex items-center gap-2 px-6 py-3 rounded-[1.5rem] text-xs font-black uppercase tracking-widest transition-all",
@@ -197,7 +224,16 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
           >
             <Activity size={16} /> Velocity
           </button>
-          <button 
+          <button
+            onClick={() => setActiveSubTab('time-tracker')}
+            className={clsx(
+              "flex items-center gap-2 px-6 py-3 rounded-[1.5rem] text-xs font-black uppercase tracking-widest transition-all",
+              activeSubTab === 'time-tracker' ? "bg-[#1E3A5F] text-white shadow-md" : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            <Timer size={16} /> Time Tracker
+          </button>
+          <button
             onClick={() => setActiveSubTab('no-bid')}
             className={clsx(
               "flex items-center gap-2 px-6 py-3 rounded-[1.5rem] text-xs font-black uppercase tracking-widest transition-all",
@@ -209,13 +245,132 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
         </div>
       </div>
 
+      {/* Unified Filter Bar - Matching User Image */}
+      {(activeSubTab === 'velocity' || activeSubTab === 'time-tracker' || activeSubTab === 'overview') && (
+        <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-6 space-y-6 animate-fade-in translate-y-[-10px] mb-2">
+          {/* Row 1: Status and Quick Horizon */}
+          <div className="flex flex-col lg:flex-row justify-between gap-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Current Status</label>
+              <div className="flex flex-wrap gap-1.5 p-1 bg-slate-50 border border-slate-100 rounded-[1.5rem] w-fit">
+                {statusFilterConfigs.map((cfg) => (
+                  <button
+                    key={cfg.id}
+                    onClick={() => setFilterStatus(cfg.id as any)}
+                    className={clsx(
+                      "flex items-center gap-2 px-4 py-2 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest transition-all",
+                      filterStatus === cfg.id ? cfg.activeClass : cfg.inactiveClass
+                    )}
+                  >
+                    {cfg.icon} {cfg.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2 text-right">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-1">Quick Horizon</label>
+              <div className="flex gap-1.5 p-1 bg-slate-50 border border-slate-100 rounded-[1.5rem] w-fit ml-auto">
+                {(['All', 'This Week', 'This Month'] as const).map((h) => (
+                  <button
+                    key={h}
+                    onClick={() => setQuickHorizon(h)}
+                    className={clsx(
+                      "px-5 py-2 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest transition-all",
+                      quickHorizon === h ? "bg-[#D32F2F] text-white shadow-lg" : "text-slate-400 hover:text-slate-600 hover:bg-white"
+                    )}
+                  >
+                    {h}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="h-px bg-slate-100 w-full opacity-50"></div>
+
+          {/* Row 2: Range, Phase, Solution */}
+          <div className="flex flex-wrap items-end gap-8">
+            <div className="space-y-2 min-w-[280px]">
+              <div className="flex items-center gap-2 mb-1">
+                <Clock size={12} className="text-slate-400" />
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Custom Range</label>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                  <input
+                    type="date"
+                    value={dateRange.start}
+                    onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                  />
+                </div>
+                <div className="w-4 h-0.5 bg-slate-200"></div>
+                <div className="relative flex-1">
+                  <input
+                    type="date"
+                    value={dateRange.end}
+                    onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 min-w-[180px]">
+              <div className="flex items-center gap-2 mb-1">
+                <Briefcase size={12} className="text-slate-400" />
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Phase</label>
+              </div>
+              <select
+                value={filterStage}
+                onChange={(e) => setFilterStage(e.target.value as any)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-black uppercase tracking-widest text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all appearance-none cursor-pointer"
+              >
+                <option value="All">All Phases</option>
+                {Object.values(BidStage).map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+
+            <div className="space-y-2 min-w-[220px]">
+              <div className="flex items-center gap-2 mb-1">
+                <Zap size={12} className="text-slate-400" />
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Solution Portfolio</label>
+              </div>
+              <select
+                value={filterSolution}
+                onChange={(e) => setFilterSolution(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-black uppercase tracking-widest text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all appearance-none cursor-pointer"
+              >
+                <option value="All">All Solutions</option>
+                {SOLUTION_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+
+            <div className="flex-1"></div>
+
+            <div className="relative flex-1 min-w-[200px] mb-0.5">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input
+                type="text"
+                placeholder="SEARCH BIDS..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-xs font-black uppercase tracking-widest placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+              />
+              {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X size={14} /></button>}
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeSubTab === 'overview' ? (
-        <div className="space-y-12 animate-fade-in">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <KPIStat label="Win Rate" value={`${stats.won.percent}%`} sub="YTD Performance" color="text-emerald-500" icon={<Trophy size={20} />} progress={stats.won.percent} />
-            <KPIStat label="Total Pipeline" value={`PKR ${(stats.totalValue / 1000000).toFixed(1)}M`} sub="Estimated Value" color="text-blue-500" icon={<Target size={20} />} />
-            <KPIStat label="No-Bid Rate" value={`${stats.noBid.percent}%`} sub="Strategic Rejection" color="text-red-500" icon={<Ban size={20} />} />
-            <KPIStat label="Cycle Time" value="18.4d" sub="Avg. Submission" color="text-amber-500" icon={<Clock size={20} />} />
+        <div className="space-y-8 animate-fade-in">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <KPIStat label="Win Rate" value={`${stats.won.percent}%`} sub="YTD Performance" color="text-emerald-500" icon={<Trophy size={16} />} progress={stats.won.percent} />
+            <KPIStat label="Total Pipeline" value={`PKR ${(stats.totalValue / 1000000).toFixed(1)}M`} sub="Estimated Value" color="text-blue-500" icon={<Target size={16} />} />
+            <KPIStat label="No-Bid Rate" value={`${stats.noBid.percent}%`} sub="Strategic Rejection" color="text-red-500" icon={<Ban size={16} />} />
+            <KPIStat label="Cycle Time" value="18.4d" sub="Avg. Submission" color="text-amber-500" icon={<Clock size={16} />} />
           </div>
 
           <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm">
@@ -251,23 +406,23 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
       ) : activeSubTab === 'velocity' ? (
         <div className="space-y-8 animate-fade-in text-left">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-slate-900 rounded-[2rem] p-8 text-white flex flex-col justify-center relative overflow-hidden group">
-               <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-125 transition-transform duration-500"><TrendingUp size={100} /></div>
-               <div className="flex items-center gap-2 mb-4"><Sparkles size={16} className="text-amber-400" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Avg. Submission Velocity</span></div>
-               <div className="text-4xl font-black mb-1">{velocityInsights?.avgCycle}d</div>
-               <p className="text-[10px] font-bold text-slate-400 uppercase">Per Opportunity Lifecycle</p>
+            <div className="bg-slate-900 rounded-[2rem] p-6 text-white flex flex-col justify-center relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-125 transition-transform duration-500"><TrendingUp size={64} /></div>
+              <div className="flex items-center gap-2 mb-3"><Sparkles size={14} className="text-amber-400" /><span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Avg. Submission Velocity</span></div>
+              <div className="text-3xl font-black mb-1">{velocityInsights?.avgCycle}d</div>
+              <p className="text-[9px] font-bold text-slate-400 uppercase">Per Opportunity Lifecycle</p>
             </div>
-            <div className="bg-white border-2 border-[#D32F2F] rounded-[2rem] p-8 flex flex-col justify-center relative group">
-               <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:rotate-12 transition-transform duration-500"><ZapOff size={80} className="text-[#D32F2F]" /></div>
-               <div className="flex items-center gap-2 mb-4"><AlertCircle size={16} className="text-[#D32F2F]" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Identified Bottleneck</span></div>
-               <div className="text-2xl font-black text-slate-900 mb-1 uppercase tracking-tight">{velocityInsights?.bottleneck.name}</div>
-               <p className="text-[10px] font-bold text-red-500 uppercase">Avg. {velocityInsights?.bottleneck.avg.toFixed(1)} days in phase</p>
+            <div className="bg-white border-2 border-[#D32F2F] rounded-[2rem] p-6 flex flex-col justify-center relative group">
+              <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:rotate-12 transition-transform duration-500"><ZapOff size={64} className="text-[#D32F2F]" /></div>
+              <div className="flex items-center gap-2 mb-3"><AlertCircle size={14} className="text-[#D32F2F]" /><span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Identified Bottleneck</span></div>
+              <div className="text-xl font-black text-slate-900 mb-1 uppercase tracking-tight">{velocityInsights?.bottleneck.name}</div>
+              <p className="text-[9px] font-bold text-red-500 uppercase">Avg. {velocityInsights?.bottleneck.avg.toFixed(1)} days in phase</p>
             </div>
-            <div className="bg-emerald-500 rounded-[2rem] p-8 text-white flex flex-col justify-center relative group">
-               <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:-translate-y-2 transition-transform duration-500"><CheckCircle2 size={100} /></div>
-               <div className="flex items-center gap-2 mb-4 text-white/80"><Zap size={16} className="text-white" /><span className="text-[10px] font-black uppercase tracking-widest">Efficiency Status</span></div>
-               <div className="text-4xl font-black mb-1">{velocityInsights?.efficiencyIndex}</div>
-               <p className="text-[10px] font-bold text-white/70 uppercase">Based on Benchmarks</p>
+            <div className="bg-emerald-500 rounded-[2rem] p-6 text-white flex flex-col justify-center relative group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:-translate-y-2 transition-transform duration-500"><CheckCircle2 size={64} /></div>
+              <div className="flex items-center gap-2 mb-3 text-white/80"><Zap size={14} className="text-white" /><span className="text-[9px] font-black uppercase tracking-widest">Efficiency Status</span></div>
+              <div className="text-3xl font-black mb-1">{velocityInsights?.efficiencyIndex}</div>
+              <p className="text-[9px] font-bold text-white/70 uppercase">Based on Benchmarks</p>
             </div>
           </div>
 
@@ -282,14 +437,82 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
                   <tr><th className="px-12 py-8">Bid Identity</th><th className="px-12 py-8">Stage Distribution (Days)</th><th className="px-12 py-8 text-right">Total Horizon</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {filteredBids.map((bid) => {
+                  {filteredBids.map((bid, index) => {
+                    const isFirst = index === 0;
                     const startDate = bid.stageHistory?.[0]?.timestamp || bid.receivedDate;
                     const endDate = (bid.status === BidStatus.SUBMITTED || bid.status === BidStatus.WON || bid.status === BidStatus.LOST) ? (bid.submissionDate || new Date().toISOString()) : new Date().toISOString();
                     const totalDays = getDaysBetween(startDate, endDate);
                     return (
-                      <tr key={bid.id} className="group hover:bg-slate-50/50 transition-all">
+                      <tr key={bid.id} className="group group/row hover:bg-slate-50/50 transition-all relative hover:z-[60]">
                         <td className="px-12 py-10 max-w-xs"><div className="font-black text-slate-900 leading-tight text-lg group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div><div className="text-[11px] text-slate-400 font-bold uppercase mt-1 tracking-tight">{bid.customerName}</div></td>
-                        <td className="px-12 py-10"><div className="flex items-center w-full min-w-[500px] h-14 bg-slate-100 rounded-2xl p-1.5 border border-slate-200 overflow-hidden relative shadow-inner">{Object.entries(bid.daysInStages).map(([stage, days]: [string, any], idx, arr) => (<div key={stage} className={clsx("h-full flex items-center justify-center relative group/stage transition-all border-r border-white/20 last:border-0", STAGE_COLORS[stage] || 'bg-slate-300', idx === 0 ? "rounded-l-xl" : "", idx === arr.length - 1 ? "rounded-r-xl" : "")} style={{ flex: (days as number) || 0.1 }}>{(days as number) > 0 && (<div className="opacity-0 group-hover/stage:opacity-100 absolute -top-10 bg-slate-900 text-white text-[9px] font-black px-3 py-1.5 rounded-lg whitespace-nowrap z-20 pointer-events-none transition-all scale-75 group-hover/stage:scale-100">{stage}: {days} Days</div>)}<span className="text-[10px] font-black text-white shadow-sm">{(days as number) > 0 ? `${days}d` : ''}</span></div>))}</div></td>
+                        <td className="px-12 py-10">
+                          <div className="flex items-center w-full min-w-[500px] h-14 bg-slate-100 rounded-2xl p-1.5 border border-slate-200 relative shadow-inner">
+                            {Object.entries(bid.daysInStages).map(([stage, days]: [string, any], idx, arr) => {
+                              // Find phase dates from history
+                              const historyIdx = bid.stageHistory?.findIndex(h => h.stage === (stage as any));
+                              const phaseStart = bid.stageHistory?.[historyIdx]?.timestamp || bid.receivedDate;
+                              const phaseEnd = bid.stageHistory?.[historyIdx + 1]?.timestamp ||
+                                (stage === bid.currentStage ? new Date().toISOString() : null);
+
+                              return (
+                                <div
+                                  key={stage}
+                                  className={clsx(
+                                    "h-full flex items-center justify-center relative group/stage hover:brightness-110 transition-colors border-r border-white/20 last:border-0",
+                                    STAGE_COLORS[stage] || 'bg-slate-300',
+                                    idx === 0 ? "rounded-l-xl" : "",
+                                    idx === arr.length - 1 ? "rounded-r-xl" : "",
+                                    stage === bid.currentStage && "animate-pulse group-hover/row:animate-none"
+                                  )}
+                                  style={{ flex: (days as number) || 0.1 }}
+                                >
+                                  {(days as number) > 0 && (
+                                    <div className={clsx(
+                                      "opacity-0 group-hover/stage:opacity-100 absolute left-1/2 -translate-x-1/2 bg-white/95 text-slate-900 shadow-[0_30px_60px_rgba(0,0,0,0.2)] rounded-3xl z-[100] pointer-events-none w-72 border border-slate-200 backdrop-blur-xl transition-all p-6 scale-90 group-hover/stage:scale-100",
+                                      isFirst ? "top-full mt-6 origin-top" : "bottom-full mb-6 origin-bottom"
+                                    )}>
+                                      <div className="flex items-center gap-3 mb-4 border-b border-slate-100 pb-3">
+                                        <div className={clsx("p-2 rounded-lg text-white", STAGE_COLORS[stage] || 'bg-slate-400')}>
+                                          <Activity size={18} />
+                                        </div>
+                                        <div>
+                                          <div className="font-black uppercase tracking-widest text-slate-900 text-[11px]">{stage}</div>
+                                          <div className="text-[9px] text-slate-400 font-bold uppercase">Phase Velocity</div>
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-3">
+                                        <div className="flex justify-between items-center py-2 px-3 bg-slate-50 rounded-xl border border-slate-100">
+                                          <span className="text-[11px] text-slate-500 font-medium italic">Time Spent</span>
+                                          <span className="text-sm font-black text-slate-900">{days}d</span>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 gap-2">
+                                          <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                                            <div className="text-[9px] text-slate-400 font-black uppercase mb-2">Timeline Range</div>
+                                            <div className="text-xs font-black text-slate-800 flex flex-col gap-2">
+                                              <div className="flex justify-between">
+                                                <span className="text-slate-400 font-medium">Began:</span>
+                                                <span>{new Date(phaseStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                              </div>
+                                              {phaseEnd && (
+                                                <div className="flex justify-between border-t border-slate-200/50 pt-2">
+                                                  <span className="text-slate-400 font-medium">Ended:</span>
+                                                  <span>{new Date(phaseEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  <span className="text-[10px] font-black text-white shadow-sm">{(days as number) > 0 ? `${days}d` : ''}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </td>
                         <td className="px-12 py-10 text-right"><div className="text-3xl font-black text-slate-900">{totalDays}d</div><div className="text-[9px] font-bold text-slate-400 uppercase mt-1">Total Cycle</div></td>
                       </tr>
                     );
@@ -299,6 +522,8 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
             </div>
           </div>
         </div>
+      ) : activeSubTab === 'time-tracker' ? (
+        <BidTimeTrackerView bids={filteredBids} />
       ) : (
         <div className="space-y-10 animate-fade-in text-left">
           <div className="bg-slate-900 p-12 rounded-[4rem] text-white relative overflow-hidden group">
@@ -317,11 +542,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
 };
 
 const KPIStat: React.FC<{ label: string; value: string; sub: string; color: string; icon: React.ReactNode; progress?: number }> = ({ label, value, sub, color, icon, progress }) => (
-  <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm relative overflow-hidden group text-left">
-    <div className="flex items-center justify-between mb-6"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</span><div className={clsx("p-3 bg-slate-50 rounded-2xl transition-transform group-hover:scale-110", color)}>{icon}</div></div>
-    <div className="text-4xl font-black text-slate-900 mb-2">{value}</div>
-    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{sub}</div>
-    {progress !== undefined && (<div className="mt-6 h-2 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100"><div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${progress}%` }}></div></div>)}
+  <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group text-left">
+    <div className="flex items-center justify-between mb-4"><span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</span><div className={clsx("p-2.5 bg-slate-50 rounded-xl transition-transform group-hover:scale-110", color)}>{icon}</div></div>
+    <div className="text-2xl font-black text-slate-900 mb-1">{value}</div>
+    <div className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">{sub}</div>
+    {progress !== undefined && (<div className="mt-4 h-1.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100"><div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${progress}%` }}></div></div>)}
   </div>
 );
 

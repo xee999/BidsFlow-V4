@@ -8,11 +8,12 @@ import {
   FileSpreadsheet, Package, BadgeDollarSign, Plus, Briefcase, Layers,
   FileBox, ClipboardList, FileSearch, FileBadge, ExternalLink, Filter,
   Activity, Calculator, Lock, Archive, Tag, Trash2, Flag, Award, ThumbsUp,
-  Banknote, Landmark
+  MapPin, Banknote, Landmark
 } from 'lucide-react';
 import { BidRecord, BidStage, BidStatus, TechnicalDocument, StageTransition, ComplianceItem, QualificationItem, RiskLevel, FinancialFormat, ApprovingAuthorityRole } from '../types.ts';
 import { STAGE_ICONS } from '../constants.tsx';
-import { analyzePricingDocument, analyzeComplianceDocuments, generateFinalRiskAssessment, generateStrategicRiskAssessment, analyzeSolutioningDocuments, analyzeBidSecurityDocument } from '../services/gemini.ts';
+import JSZip from 'jszip';
+import { analyzePricingDocument, analyzeComplianceDocuments, generateFinalRiskAssessment, generateStrategicRiskAssessment, analyzeSolutioningDocuments, analyzeBidSecurityDocument, tagTechnicalDocuments } from '../services/gemini.ts';
 import FloatingAIChat from './FloatingAIChat.tsx';
 import { clsx } from 'clsx';
 
@@ -45,6 +46,8 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isAnalyzingBidSecurity, setIsAnalyzingBidSecurity] = useState(false);
+  const [scanningStatus, setScanningStatus] = useState<string | null>(null);
+  const [isSolutioningAIRunning, setIsSolutioningAIRunning] = useState(false);
   const [isEvaluatingRisk, setIsEvaluatingRisk] = useState(false);
   const [isEvaluatingStrategicRisk, setIsEvaluatingStrategicRisk] = useState(false);
   const [isAnalyzingSolution, setIsAnalyzingSolution] = useState(false);
@@ -195,7 +198,9 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
   const handleBidSecurityUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setIsAnalyzing(true);
     setIsAnalyzingBidSecurity(true);
+    setScanningStatus("Analyzing Bid Security...");
     const reader = new FileReader();
     reader.onload = async () => {
       const base64 = (reader.result as string).split(',')[1];
@@ -234,6 +239,8 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
         console.error("Bid security scan failed", err);
       } finally {
         setIsAnalyzingBidSecurity(false);
+        setIsAnalyzing(false);
+        setScanningStatus(null);
         if (e.target) e.target.value = "";
       }
     };
@@ -246,6 +253,121 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
     const file = e.target.files?.[0];
     if (!file) return;
     setIsAnalyzing(true);
+    setScanningStatus("Initializing...");
+
+    // ZIP Extraction Logic for Bulk Upload
+    if (file.name.toLowerCase().endsWith('.zip')) {
+      try {
+        const zip = await JSZip.loadAsync(file);
+        let extractedDocs: TechnicalDocument[] = [];
+
+        const zipEntries = Object.entries(zip.files).filter(([name, entry]) =>
+          !entry.dir &&
+          name.toLowerCase().endsWith('.pdf') &&
+          !name.includes('__MACOSX') &&
+          !name.split('/').pop()?.startsWith('._')
+        );
+
+        if (zipEntries.length === 0) {
+          alert("No PDF files found in the ZIP folder.");
+          setIsAnalyzing(false);
+          setScanningStatus(null);
+          return;
+        }
+
+        setScanningStatus(`Extracting ${zipEntries.length} files...`);
+
+        for (const [filename, fileObj] of zipEntries) {
+          const base64 = await fileObj.async('base64');
+          extractedDocs.push({
+            id: 'asset-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+            name: filename.split('/').pop() || filename,
+            type: 'PDF',
+            category: category as any,
+            uploadDate: new Date().toLocaleDateString(),
+            fileData: base64, // Ensure base64 is populated for AI
+            tags: [category, 'ZIP-Extracted']
+          });
+        }
+
+        if (extractedDocs.length > 0) {
+          // 1. Immediate Update: Show files to user
+          let currentBidDocs = [...bid.technicalDocuments, ...extractedDocs];
+
+          // Smart Tagging (Optimistic Update)
+          setScanningStatus("AI Tagging...");
+          try {
+            const tagResult = await tagTechnicalDocuments(extractedDocs);
+            if (tagResult?.taggedFiles) {
+              currentBidDocs = currentBidDocs.map(doc => {
+                const newInfo = extractedDocs.find(d => d.name === doc.name); // only update new ones
+                if (!newInfo) return doc; // existing
+
+                const info = tagResult.taggedFiles.find((f: any) => f.fileName === doc.name);
+                return info ? { ...doc, tags: [...(info.tags || []), 'AI-Tagged'], summary: info.summary } : doc;
+              });
+            }
+          } catch (e) {
+            console.warn("Tagging failed, proceeding with extraction.");
+          }
+
+          const updatedDocsBid = { ...bid, technicalDocuments: currentBidDocs };
+          onUpdate(updatedDocsBid); // First update to show files
+
+          // 2. Deep Analysis: Checklist Mapping
+          setScanningStatus("Deep Scanning (Gemini 1.5 Pro)...");
+          const checklistItems = [
+            ...(bid.complianceChecklist || []).map(c => ({ id: c.id, requirement: c.requirement, category: 'Compliance' })),
+            ...(bid.technicalQualificationChecklist || []).map(t => ({ id: t.id, requirement: t.requirement, category: 'Technical' }))
+          ];
+
+          if (checklistItems.length > 0) {
+            const criteria = bid.summaryRequirements || `Compliance evaluation for ${bid.projectName} with ${bid.customerName}.`;
+            // USE extractedDocs explicitly to ensure they are scanned if total docs is large? 
+            // Better to use currentBidDocs which contains everything.
+            const complianceResult = await analyzeComplianceDocuments(criteria, checklistItems, currentBidDocs);
+
+            if (complianceResult?.updatedChecklist) {
+              console.log("Compliance Extraction Success:", complianceResult.updatedChecklist.length);
+              let updatedCompliance = [...(bid.complianceChecklist || [])];
+              let updatedTechnical = [...(bid.technicalQualificationChecklist || [])];
+
+              complianceResult.updatedChecklist.forEach((aiItem: any) => {
+                if (aiItem.status === 'Complete' && aiItem.id) {
+                  const complianceIdx = updatedCompliance.findIndex(c => c.id === aiItem.id);
+                  const technicalIdx = updatedTechnical.findIndex(t => t.id === aiItem.id);
+
+                  console.log(`Processing AI Item: ${aiItem.id} | Compliance Match: ${complianceIdx} | Technical Match: ${technicalIdx}`);
+
+                  if (complianceIdx !== -1) {
+                    updatedCompliance[complianceIdx] = { ...updatedCompliance[complianceIdx], status: 'Complete', aiComment: aiItem.aiComment };
+                  }
+                  if (technicalIdx !== -1) {
+                    updatedTechnical[technicalIdx] = { ...updatedTechnical[technicalIdx], status: 'Complete', aiComment: aiItem.aiComment };
+                  }
+                }
+              });
+
+              const finalBid = {
+                ...updatedDocsBid, // Use the bid with docs
+                complianceChecklist: updatedCompliance,
+                technicalQualificationChecklist: updatedTechnical
+              };
+              onUpdate(finalBid); // Second update with checklist status
+              if (category === 'Technical') await runSolutionAnalysis(finalBid);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("ZIP Extraction Error:", err);
+        alert("Failed to process ZIP file.");
+      } finally {
+        setIsAnalyzing(false);
+        setScanningStatus(null);
+        if (e.target) e.target.value = "";
+      }
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = async () => {
@@ -255,18 +377,44 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
       try {
         let updatedBid = { ...bid };
         if (category === 'Pricing') {
-          const result = isPDF ? await analyzePricingDocument(base64, bid.contractDuration || "12 Months", bid.financialFormats || []) : null;
+          setScanningStatus("Analyzing Pricing Proposal...");
+          const result = await analyzePricingDocument(base64, bid.contractDuration || "12 Months", bid.financialFormats || [], file.type);
           if (result) {
             let updatedFormats: FinancialFormat[] = [];
 
             if (bid.financialFormats && bid.financialFormats.length > 0) {
-              updatedFormats = bid.financialFormats.map(f => {
-                const matched = result.populatedFinancialFormat?.find((pf: any) => pf.item === f.item || (pf.description && pf.description.includes(f.item)));
+              const existingFormats = [...bid.financialFormats];
+              const aiItems = result.populatedFinancialFormat || [];
+
+              // 1. Update existing items
+              updatedFormats = existingFormats.map(f => {
+                const matched = aiItems.find((pf: any) =>
+                  (pf.item && pf.item.toLowerCase().trim() === f.item.toLowerCase().trim()) ||
+                  (pf.description && pf.description.toLowerCase().includes(f.item.toLowerCase().trim()))
+                );
                 if (matched) {
                   const up = matched.unitPrice ?? f.unitPrice ?? 0;
                   return { ...f, unitPrice: up, totalPrice: up * f.quantity };
                 }
                 return f;
+              });
+
+              // 2. Append new items discovered by AI
+              aiItems.forEach((pf: any) => {
+                const isNew = !updatedFormats.some(f =>
+                  (pf.item && pf.item.toLowerCase().trim() === f.item.toLowerCase().trim()) ||
+                  (pf.description && pf.description.toLowerCase().includes(f.item.toLowerCase().trim()))
+                );
+                if (isNew) {
+                  updatedFormats.push({
+                    item: pf.item || 'New Item',
+                    description: pf.description || '',
+                    uom: pf.uom || 'Unit',
+                    quantity: pf.quantity || 1,
+                    unitPrice: pf.unitPrice || 0,
+                    totalPrice: (pf.unitPrice || 0) * (pf.quantity || 1)
+                  });
+                }
               });
             } else if (result.populatedFinancialFormat && result.populatedFinancialFormat.length > 0) {
               updatedFormats = result.populatedFinancialFormat.map((pf: any) => ({
@@ -278,6 +426,8 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                 totalPrice: (pf.unitPrice || 0) * (pf.quantity || 1)
               }));
             }
+
+            const totalExcl = updatedFormats.reduce((acc, f) => acc + (f.totalPrice || 0), 0);
 
             const newDoc: TechnicalDocument = {
               id: 'asset-' + Date.now(),
@@ -293,8 +443,8 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
               ...bid,
               technicalDocuments: [...bid.technicalDocuments, newDoc],
               financialFormats: updatedFormats,
-              tcvExclTax: result.tcvExclTax || updatedFormats.reduce((acc, f) => acc + (f.totalPrice || 0), 0),
-              tcvInclTax: result.tcvInclTax || (result.tcvExclTax ? result.tcvExclTax * 1.17 : 0),
+              tcvExclTax: totalExcl,
+              tcvInclTax: totalExcl * 1.17, // Assuming 17% tax
               vendorPaymentTerms: result.vendorPaymentTerms,
               contractDuration: result.contractDuration || bid.contractDuration,
               customerPaymentTerms: result.customerPaymentTerms || bid.customerPaymentTerms
@@ -302,11 +452,21 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
           }
         } else {
           const checklistItems = [
-            ...(bid.complianceChecklist || []).map(c => ({ requirement: c.requirement, category: 'Compliance' })),
-            ...(bid.technicalQualificationChecklist || []).map(t => ({ requirement: t.requirement, category: 'Technical' }))
+            ...(bid.complianceChecklist || []).map(c => ({ id: c.id, requirement: c.requirement, category: 'Compliance' })),
+            ...(bid.technicalQualificationChecklist || []).map(t => ({ id: t.id, requirement: t.requirement, category: 'Technical' }))
           ];
 
-          const result = isPDF ? await analyzeComplianceDocuments(bid.summaryRequirements, checklistItems, base64) : null;
+          const criteria = bid.summaryRequirements || `Compliance evaluation for ${bid.projectName} with ${bid.customerName}.`;
+          const result = isPDF ? await analyzeComplianceDocuments(criteria, checklistItems, [...bid.technicalDocuments, { name: file.name, fileData: base64 }]) : null;
+
+          // Smart Tagging for single file
+          let finalTags = result?.detectedTags || [category, 'Asset'];
+          let finalSummary = '';
+          const tagResult = await tagTechnicalDocuments([{ name: file.name }]);
+          if (tagResult?.taggedFiles?.[0]) {
+            finalTags = [...new Set([...finalTags, ...(tagResult.taggedFiles[0].tags || []), 'AI-Tagged'])];
+            finalSummary = tagResult.taggedFiles[0].summary;
+          }
 
           const newDoc: TechnicalDocument = {
             id: 'asset-' + Date.now(),
@@ -316,7 +476,8 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
             uploadDate: new Date().toLocaleDateString(),
             aiScore: result?.confidenceScore,
             aiMatchDetails: result ? result.assessment : "Manual check needed.",
-            tags: result?.detectedTags || [category, 'Asset'],
+            tags: finalTags,
+            summary: finalSummary,
             fileData: base64
           };
 
@@ -324,21 +485,28 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
           let updatedTechnical = [...(bid.technicalQualificationChecklist || [])];
 
           if (result?.updatedChecklist) {
-            result.updatedChecklist.forEach((aiItem: any) => {
-              const aiReq = (aiItem.requirement || "").toLowerCase().trim();
-              const aiStatus = (aiItem.status || "").toLowerCase().trim();
+            console.log("Compliance Audit Result (Single File):", result.updatedChecklist);
 
-              if (aiStatus === 'complete') {
-                updatedCompliance = updatedCompliance.map(c =>
-                  c.requirement.toLowerCase().trim() === aiReq
-                    ? { ...c, status: 'Complete', aiComment: aiItem.aiComment || c.aiComment }
-                    : c
-                );
-                updatedTechnical = updatedTechnical.map(t =>
-                  t.requirement.toLowerCase().trim() === aiReq
-                    ? { ...t, status: 'Complete', aiComment: aiItem.aiComment || t.aiComment }
-                    : t
-                );
+            result.updatedChecklist.forEach((aiItem: any) => {
+              if (aiItem.status === 'Complete' && aiItem.id) {
+                // ID-Based Matching
+                const complianceIdx = updatedCompliance.findIndex(c => c.id === aiItem.id);
+                if (complianceIdx !== -1) {
+                  updatedCompliance[complianceIdx] = {
+                    ...updatedCompliance[complianceIdx],
+                    status: 'Complete',
+                    aiComment: aiItem.aiComment || updatedCompliance[complianceIdx].aiComment
+                  };
+                }
+
+                const technicalIdx = updatedTechnical.findIndex(t => t.id === aiItem.id);
+                if (technicalIdx !== -1) {
+                  updatedTechnical[technicalIdx] = {
+                    ...updatedTechnical[technicalIdx],
+                    status: 'Complete',
+                    aiComment: aiItem.aiComment || updatedTechnical[technicalIdx].aiComment
+                  };
+                }
               }
             });
           }
@@ -361,6 +529,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
         console.error("AI Analysis failed:", err);
       } finally {
         setIsAnalyzing(false);
+        setScanningStatus(null);
         if (e.target) e.target.value = "";
       }
     };
@@ -393,6 +562,24 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
     const updatedDocs = bid.technicalDocuments.filter(d => d.id !== deletingAssetId);
     onUpdate({ ...bid, technicalDocuments: updatedDocs });
     setDeletingAssetId(null);
+  };
+
+  const handleUpdatePrice = (index: number, price: string) => {
+    const numPrice = parseFloat(price.replace(/,/g, '')) || 0;
+    const updatedFormats = [...(bid.financialFormats || [])];
+    updatedFormats[index] = {
+      ...updatedFormats[index],
+      unitPrice: numPrice,
+      totalPrice: numPrice * updatedFormats[index].quantity
+    };
+
+    const newExcl = updatedFormats.reduce((acc, f) => acc + (f.totalPrice || 0), 0);
+    onUpdate({
+      ...bid,
+      financialFormats: updatedFormats,
+      tcvExclTax: newExcl,
+      tcvInclTax: newExcl * 1.17 // Assuming 17% tax
+    });
   };
 
   const toggleItemStatus = (type: 'compliance' | 'technical', index: number) => {
@@ -437,7 +624,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
           ref={ref}
           onChange={(e) => handleFileUpload(e, key === 'bidSecurity' ? 'BidSecurity' : key.charAt(0).toUpperCase() + key.slice(1))}
           className="hidden"
-          accept={key === 'bidSecurity' ? ".pdf,image/png,image/jpeg" : ".pdf"}
+          accept={key === 'bidSecurity' ? ".pdf,image/png,image/jpeg" : ".pdf,.zip"}
         />
       ))}
       <aside className={clsx("bg-[#1E3A5F] text-white transition-all duration-300 flex flex-col relative z-30 shadow-2xl shrink-0", sidebarCollapsed ? "w-16" : "w-80")}>
@@ -559,44 +746,102 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
           {viewingStage !== BidStage.FINAL_REVIEW && (
             <>
               {viewingStage === BidStage.INTAKE && (
-                <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 shadow-sm mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
-                  <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-50">
-                    <div className="flex items-center gap-3">
-                      <Info className="text-blue-500" size={20} />
-                      <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Bid Brief & Scope</h3>
+                <>
+                  <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 shadow-sm mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
+                    <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-50">
+                      <div className="flex items-center gap-3">
+                        <Info className="text-blue-500" size={20} />
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Bid Brief & Scope</h3>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {bid.preBidMeeting?.date && (
+                          <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500 text-white rounded-lg group relative cursor-help">
+                            <MapPin size={10} />
+                            <span className="text-[9px] font-black uppercase tracking-wider">
+                              Pre-Bid: {new Date(bid.preBidMeeting.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                            </span>
+                            {/* Tooltip for Pre-Bid Meeting */}
+                            <div className="opacity-0 group-hover:opacity-100 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-slate-900 text-white text-[10px] rounded-xl shadow-2xl transition-opacity pointer-events-none z-50 border border-white/10 backdrop-blur-md">
+                              <div className="font-black uppercase tracking-widest text-amber-400 mb-1">Pre-Bid Meeting</div>
+                              <div className="space-y-1">
+                                <p className="flex justify-between"><span>Time:</span> <span className="font-bold">{bid.preBidMeeting.time}</span></p>
+                                <p className="flex justify-between"><span>Location:</span> <span className="font-bold truncate max-w-[100px]">{bid.preBidMeeting.location}</span></p>
+                                {bid.preBidMeeting.isMandatory && <p className="text-red-400 font-black uppercase text-[8px]">Mandatory Attendance</p>}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {(bid.requiredSolutions || []).map(s => (
+                          <span key={s} className="px-3 py-1 bg-red-50 text-red-500 rounded-lg text-[9px] font-black uppercase tracking-wider">{s}</span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      {(bid.requiredSolutions || []).map(s => (
-                        <span key={s} className="px-3 py-1 bg-red-50 text-red-500 rounded-lg text-[9px] font-black uppercase tracking-wider">{s}</span>
-                      ))}
+                    <div className="space-y-6">
+                      <div className="bg-slate-50 rounded-2xl p-6">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Project Summary</h4>
+                        <p className="text-sm font-medium text-slate-700 leading-relaxed">{bid.summaryRequirements || 'No summary available.'}</p>
+                      </div>
+                      <div className="bg-slate-50 rounded-2xl p-6">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Scope of Work</h4>
+                        <p className="text-sm font-medium text-slate-700 leading-relaxed">{bid.scopeOfWork || 'No scope defined.'}</p>
+                      </div>
                     </div>
                   </div>
-                  <div className="space-y-6">
-                    <div className="bg-slate-50 rounded-2xl p-6">
-                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Project Summary</h4>
-                      <p className="text-sm font-medium text-slate-700 leading-relaxed">{bid.summaryRequirements || 'No summary available.'}</p>
+
+                  {/* Key Deliverables Physical Summary */}
+                  {bid.deliverablesSummary && bid.deliverablesSummary.length > 0 && (
+                    <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 shadow-sm mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
+                        <Package className="text-[#D32F2F]" size={20} />
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Key Deliverables</h3>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {bid.deliverablesSummary.map((item, idx) => (
+                          <div key={idx} className="bg-slate-50 rounded-2xl p-5 border border-slate-100 shadow-sm flex flex-col gap-3 group hover:border-[#D32F2F] hover:bg-white transition-all">
+                            <div className="flex items-center gap-4">
+                              <div className="w-12 h-12 bg-white rounded-xl shadow-inner flex items-center justify-center text-slate-400 group-hover:text-[#D32F2F] group-hover:scale-110 transition-all border border-slate-100">
+                                <Activity size={24} />
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{item.item}</p>
+                                <p className="text-base font-black text-slate-900 tracking-tight">{item.quantity}</p>
+                              </div>
+                            </div>
+                            {item.specs && (
+                              <div className="pt-3 border-t border-slate-100">
+                                <p className="text-[9px] font-medium text-slate-500 leading-relaxed italic">{item.specs}</p>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div className="bg-slate-50 rounded-2xl p-6">
-                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Scope of Work</h4>
-                      <p className="text-sm font-medium text-slate-700 leading-relaxed">{bid.scopeOfWork || 'No scope defined.'}</p>
-                    </div>
-                  </div>
-                </div>
+                  )}
+                </>
               )}
 
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 animate-in fade-in slide-in-from-top-2 duration-500">
-                <CompactChecklist title="General Compliance" items={bid.complianceChecklist || []} icon={<ShieldCheck className="text-blue-500" size={16} />} onToggle={(i) => !isPreviewingFuture && toggleItemStatus('compliance', i)} readOnly={isPreviewingFuture} />
-                <CompactChecklist title="Technical Compliance" items={bid.technicalQualificationChecklist || []} icon={<CheckSquare className="text-amber-500" size={16} />} onToggle={(i) => !isPreviewingFuture && toggleItemStatus('technical', i)} readOnly={isPreviewingFuture} />
-                <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-xl flex flex-col justify-center items-center text-center">
-                  <div className="absolute top-0 right-0 p-6 opacity-5"><Sparkles size={80} /></div>
-                  <div className="text-xs font-black uppercase text-slate-500 tracking-widest mb-2">Bid Integrity Index</div>
-                  <div className="text-6xl font-black text-[#FFC107]">{integrityScore}%</div>
+              {viewingStage !== BidStage.QUALIFICATION && (
+                <div className={clsx(
+                  "grid grid-cols-1 gap-8 animate-in fade-in slide-in-from-bottom-2 duration-500",
+                  viewingStage === BidStage.INTAKE ? "xl:grid-cols-2" : "xl:grid-cols-3"
+                )}>
+                  <CompactChecklist title="General Compliance" items={bid.complianceChecklist || []} icon={<ShieldCheck className="text-blue-500" size={16} />} onToggle={(i) => !isPreviewingFuture && toggleItemStatus('compliance', i)} readOnly={isPreviewingFuture} />
+                  <CompactChecklist title="Technical Compliance" items={bid.technicalQualificationChecklist || []} icon={<CheckSquare className="text-amber-500" size={16} />} onToggle={(i) => !isPreviewingFuture && toggleItemStatus('technical', i)} readOnly={isPreviewingFuture} />
+
+                  {/* Hide Integrity Index card in Intake Stage */}
+                  {viewingStage !== BidStage.INTAKE && (
+                    <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-xl flex flex-col justify-center items-center text-center">
+                      <div className="absolute top-0 right-0 p-6 opacity-5"><Sparkles size={80} /></div>
+                      <div className="text-xs font-black uppercase text-slate-500 tracking-widest mb-2">Bid Integrity Index</div>
+                      <div className="text-6xl font-black text-[#FFC107]">{integrityScore}%</div>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </>
           )}
 
-          <div className={clsx("space-y-12 transition-all duration-500", isPreviewingFuture && "opacity-60 pointer-events-none")}>
+          <div className={clsx("space-y-12 transition-all duration-500", isPreviewingFuture && "opacity-60")}>
 
             {viewingStage === BidStage.COMPLIANCE && (
               <div className="space-y-10 animate-in fade-in duration-700">
@@ -679,64 +924,108 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
 
                 <StageSection title="Regulatory & Compliance Assets" icon={<ShieldCheck className="text-blue-500" />}>
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <UploadPortal onClick={() => refs.compliance.current?.click()} title="Compliance Docs" desc="Legal & Tax Credentials" loading={isAnalyzing} icon={<ShieldCheck size={24} className="text-blue-500" />} />
-                    <UploadPortal onClick={() => refs.annexure.current?.click()} title="Annexures" desc="RFP Specific Appendices" loading={isAnalyzing} icon={<FileBox size={24} className="text-amber-500" />} />
-                    <UploadPortal onClick={() => refs.supporting.current?.click()} title="Supporting Docs" desc="Any other bid collateral" loading={isAnalyzing} icon={<Layers size={24} className="text-indigo-500" />} />
+                    <UploadPortal onClick={() => refs.compliance.current?.click()} title="Compliance Docs" desc="Legal & Tax Credentials" loading={isAnalyzing} status={scanningStatus} icon={<ShieldCheck size={24} className="text-blue-500" />} />
+                    <UploadPortal onClick={() => refs.annexure.current?.click()} title="Annexures" desc="RFP Specific Appendices" loading={isAnalyzing} status={scanningStatus} icon={<FileBox size={24} className="text-amber-500" />} />
+                    <UploadPortal onClick={() => refs.supporting.current?.click()} title="Supporting Docs" desc="Any other bid collateral" loading={isAnalyzing} status={scanningStatus} icon={<Layers size={24} className="text-indigo-500" />} />
                   </div>
                 </StageSection>
               </div>
             )}
 
             {viewingStage === BidStage.QUALIFICATION && (
-              <StageSection title="Strategic Risk Assessment" icon={<ShieldAlert className="text-red-500" />}>
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Exposure Report</p>
-                    <button onClick={runStrategicRiskAssessment} disabled={isEvaluatingStrategicRisk} className="px-5 py-2.5 bg-[#1E3A5F] text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-900 flex items-center gap-2 transition-all disabled:opacity-50">
-                      {isEvaluatingStrategicRisk ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />} Refresh Analysis
-                    </button>
-                  </div>
-                  {bid.strategicRiskAssessment ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-500">
-                      <div className="space-y-4 text-left">
-                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Identified Friction Points</h4>
-                        <div className="space-y-3">
-                          {bid.strategicRiskAssessment.risks.map((risk, idx) => (
-                            <div key={idx} className="bg-slate-50 border border-slate-200 p-6 rounded-[1.5rem] flex items-start gap-4">
-                              <div className={clsx("w-2 h-2 rounded-full mt-1.5 shrink-0", risk.severity === RiskLevel.HIGH ? "bg-red-500 shadow-[0_0_8px_red]" : "bg-amber-500")}></div>
-                              <div><p className="text-[10px] font-black text-slate-400 uppercase mb-1">{risk.category}</p><p className="text-sm font-black text-slate-700">{risk.description}</p></div>
-                            </div>
-                          ))}
-                        </div>
+              <div className="space-y-12 animate-in fade-in duration-700">
+                <div className="space-y-12">
+                  <StageSection title="General Compliance Requirements" icon={<ShieldCheck className="text-blue-500" />}>
+                    {(bid.complianceChecklist || []).length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                        {bid.complianceChecklist.map((item, idx) => (
+                          <DetailedChecklistCard
+                            key={`comp-${idx}`}
+                            item={item}
+                            type="compliance"
+                            onToggle={() => !isPreviewingFuture && toggleItemStatus('compliance', idx)}
+                            readOnly={isPreviewingFuture}
+                          />
+                        ))}
                       </div>
-                      <div className="bg-red-50/30 border border-red-100 rounded-[2.5rem] p-8 text-left">
-                        <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest mb-6 flex items-center gap-2"><Sparkles size={14} /> AI Mitigation Plan</h4>
-                        <div className="space-y-6">
-                          {bid.strategicRiskAssessment.mitigations.map((step, idx) => (
-                            <div key={idx} className="flex gap-4 items-start group">
-                              <div className="p-2 bg-white rounded-lg shadow-sm text-amber-500 group-hover:bg-amber-500 group-hover:text-white transition-all"><Zap size={14} /></div>
-                              <p className="text-sm font-bold text-slate-700 leading-relaxed">{step}</p>
-                            </div>
-                          ))}
-                        </div>
+                    ) : (
+                      <div className="p-12 text-center border border-dashed border-slate-200 rounded-[2rem] bg-slate-50/30">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No general compliance items detected.</p>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="p-20 text-center border-2 border-dashed border-slate-200 rounded-[3rem] bg-slate-50/50">
-                      <ShieldAlert size={48} className="mx-auto text-slate-300 mb-4 opacity-50" />
-                      <button onClick={runStrategicRiskAssessment} className="text-[#D32F2F] font-black uppercase text-[10px] tracking-widest hover:underline">Start AI Scan</button>
-                    </div>
-                  )}
+                    )}
+                  </StageSection>
+
+                  <StageSection title="Technical Qualification Requirements" icon={<CheckSquare className="text-amber-500" />}>
+                    {(bid.technicalQualificationChecklist || []).length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                        {bid.technicalQualificationChecklist.map((item, idx) => (
+                          <DetailedChecklistCard
+                            key={`tech-${idx}`}
+                            item={item}
+                            type="technical"
+                            onToggle={() => !isPreviewingFuture && toggleItemStatus('technical', idx)}
+                            readOnly={isPreviewingFuture}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-12 text-center border border-dashed border-slate-200 rounded-[2rem] bg-slate-50/30">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No technical qualification items detected.</p>
+                      </div>
+                    )}
+                  </StageSection>
                 </div>
-              </StageSection>
+
+                <StageSection title="Strategic Risk Assessment" icon={<ShieldAlert className="text-red-500" />}>
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Exposure Report</p>
+                      <button onClick={runStrategicRiskAssessment} disabled={isEvaluatingStrategicRisk} className="px-5 py-2.5 bg-[#1E3A5F] text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-900 flex items-center gap-2 transition-all disabled:opacity-50">
+                        {isEvaluatingStrategicRisk ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />} Refresh Analysis
+                      </button>
+                    </div>
+                    {bid.strategicRiskAssessment ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-500">
+                        <div className="space-y-4 text-left">
+                          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Identified Friction Points</h4>
+                          <div className="space-y-3">
+                            {(bid.strategicRiskAssessment?.risks || []).map((risk, idx) => (
+                              <div key={idx} className="bg-slate-50 border border-slate-200 p-6 rounded-[1.5rem] flex items-start gap-4">
+                                <div className={clsx("w-2 h-2 rounded-full mt-1.5 shrink-0", risk.severity === RiskLevel.HIGH ? "bg-red-500 shadow-[0_0_8px_red]" : "bg-amber-500")}></div>
+                                <div><p className="text-[10px] font-black text-slate-400 uppercase mb-1">{risk.category}</p><p className="text-sm font-black text-slate-700">{risk.description}</p></div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-red-50/30 border border-red-100 rounded-[2.5rem] p-8 text-left">
+                          <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest mb-6 flex items-center gap-2"><Sparkles size={14} /> AI Mitigation Plan</h4>
+                          <div className="space-y-6">
+                            {(bid.strategicRiskAssessment?.mitigations || []).map((step, idx) => (
+                              <div key={idx} className="flex gap-4 items-start group">
+                                <div className="p-2 bg-white rounded-lg shadow-sm text-amber-500 group-hover:bg-amber-500 group-hover:text-white transition-all"><Zap size={14} /></div>
+                                <p className="text-sm font-bold text-slate-700 leading-relaxed">{step}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-20 text-center border-2 border-dashed border-slate-200 rounded-[3rem] bg-slate-50/50">
+                        <ShieldAlert size={48} className="mx-auto text-slate-300 mb-4 opacity-50" />
+                        <button onClick={runStrategicRiskAssessment} className="text-[#D32F2F] font-black uppercase text-[10px] tracking-widest hover:underline">Start AI Scan</button>
+                      </div>
+                    )}
+                  </div>
+                </StageSection>
+              </div>
             )}
 
             {viewingStage === BidStage.SOLUTIONING && (
               <StageSection title="Solutioning & Architecture" icon={<Zap className="text-amber-500" />}>
                 <div className="space-y-10">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <UploadPortal onClick={() => refs.technical.current?.click()} title="Technical Proposal" desc="Upload narrative & diagrams" loading={isAnalyzing} icon={<FileText size={24} className="text-blue-500" />} />
-                    <UploadPortal onClick={() => refs.vendor.current?.click()} title="Vendor Quotes" desc="Upload OEM prices" loading={isAnalyzing} icon={<Briefcase size={24} className="text-[#D32F2F]" />} />
+                    <UploadPortal onClick={() => refs.technical.current?.click()} title="Technical Proposal" desc="Upload narrative & diagrams" loading={isAnalyzing} status={scanningStatus} icon={<FileText size={24} className="text-blue-500" />} />
+                    <UploadPortal onClick={() => refs.vendor.current?.click()} title="Vendor Quotes" desc="Upload OEM prices" loading={isAnalyzing} status={scanningStatus} icon={<Briefcase size={24} className="text-[#D32F2F]" />} />
                   </div>
                   <div className="bg-slate-900 rounded-[3rem] p-10 text-white relative overflow-hidden shadow-2xl">
                     <div className="flex items-center justify-between mb-8">
@@ -746,7 +1035,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                       </button>
                     </div>
                     <div className="bg-white/5 border border-white/10 rounded-[1.5rem] p-8 min-h-[120px] max-h-[350px] overflow-y-auto scrollbar-hide text-left">
-                      {isAnalyzingSolution ? <div className="flex flex-col items-center justify-center py-10 gap-3"><Loader2 className="animate-spin text-[#FFC107]" size={24} /><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Checking alignment...</p></div> : bid.solutioningAIAnalysis ? <div className="space-y-4">{bid.solutioningAIAnalysis.split('\n').filter(l => l.trim()).map((line, i) => (<div key={i} className="flex gap-4 items-start"><div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#FFC107] shrink-0 shadow-[0_0_8px_#FFC107]"></div><p className="text-sm font-medium text-slate-200">{line.replace(/^[•\-\*]\s*/, '')}</p></div>))}</div> : <p className="text-center py-10 opacity-30 text-xs font-black uppercase italic">Upload technical docs for automatic analysis</p>}
+                      {isAnalyzingSolution ? <div className="flex flex-col items-center justify-center py-10 gap-3"><Loader2 className="animate-spin text-[#FFC107]" size={24} /><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Checking alignment based on project scope...</p></div> : <SolutionAnalysisView analysis={bid.solutioningAIAnalysis} isLoading={isAnalyzingSolution} />}
                     </div>
                   </div>
                 </div>
@@ -771,9 +1060,30 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                             <div key={i} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                               <div className="flex items-center gap-4"><div className="p-2 bg-white rounded-lg shadow-sm text-slate-400"><FileSpreadsheet size={14} /></div><div className="flex flex-col"><span className="text-xs font-black text-slate-700">{f.item}</span><span className="text-[9px] text-slate-400 font-bold uppercase">{f.uom || 'UNIT'}</span></div></div>
                               <div className="flex gap-10">
-                                <div className="text-center"><p className="text-[8px] text-slate-400 font-black uppercase">Qty</p><p className="text-xs font-black">{f.quantity}</p></div>
-                                <div className="text-center"><p className="text-[8px] text-slate-400 font-black uppercase">Unit Price</p><p className="text-xs font-black text-blue-600">{f.unitPrice ? `PKR ${f.unitPrice.toLocaleString()}` : '—'}</p></div>
-                                <div className="text-center"><p className="text-[8px] text-slate-400 font-black uppercase">Total</p><p className="text-xs font-black">{f.totalPrice ? `PKR ${f.totalPrice.toLocaleString()}` : '—'}</p></div>
+                                <div className="text-center w-12">
+                                  <p className="text-[8px] text-slate-400 font-black uppercase mb-1">Qty</p>
+                                  <p className="text-xs font-black text-slate-700 py-1">{f.quantity}</p>
+                                </div>
+                                <div className="text-center w-32">
+                                  <p className="text-[8px] text-slate-400 font-black uppercase mb-1">Unit Price</p>
+                                  <div className="relative group">
+                                    <input
+                                      type="text"
+                                      value={f.unitPrice ? f.unitPrice.toLocaleString() : ''}
+                                      onChange={(e) => handleUpdatePrice(i, e.target.value)}
+                                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-black text-blue-600 focus:ring-1 focus:ring-blue-500 outline-none text-right"
+                                      placeholder="0"
+                                    />
+                                    <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[8px] text-slate-300 font-black">PKR</span>
+                                  </div>
+                                </div>
+                                <div className="text-center w-32">
+                                  <p className="text-[8px] text-slate-400 font-black uppercase mb-1">Total</p>
+                                  <div className="bg-slate-100/50 py-1 rounded-lg px-2 min-h-[24px] flex items-center justify-end">
+                                    <span className="text-[8px] text-slate-300 font-black mr-auto">PKR</span>
+                                    <span className="text-xs font-black text-slate-700">{f.totalPrice ? f.totalPrice.toLocaleString() : '—'}</span>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           ))}
@@ -875,68 +1185,74 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
       </main>
       <FloatingAIChat bid={bid} />
 
-      {showNoBidModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left">
-          <div className="bg-white rounded-[3rem] w-full max-w-xl p-10 shadow-2xl animate-in zoom-in duration-300">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="p-4 bg-red-50 text-red-500 rounded-3xl"><Flag size={32} /></div>
-              <div><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">No-Bid Record</h3><p className="text-sm font-medium text-slate-500">Provide reason for strategic rejection.</p></div>
-            </div>
-            <div className="space-y-6">
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Category</label>
-                <div className="relative group">
-                  <select value={noBidCategory} onChange={(e) => setNoBidCategory(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none appearance-none transition-all">
-                    <option value="" disabled>Select Reason...</option>
-                    {COMMON_NO_BID_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                  <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+      {
+        showNoBidModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left">
+            <div className="bg-white rounded-[3rem] w-full max-w-xl p-10 shadow-2xl animate-in zoom-in duration-300">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="p-4 bg-red-50 text-red-500 rounded-3xl"><Flag size={32} /></div>
+                <div><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">No-Bid Record</h3><p className="text-sm font-medium text-slate-500">Provide reason for strategic rejection.</p></div>
+              </div>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Category</label>
+                  <div className="relative group">
+                    <select value={noBidCategory} onChange={(e) => setNoBidCategory(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none appearance-none transition-all">
+                      <option value="" disabled>Select Reason...</option>
+                      {COMMON_NO_BID_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4 mt-10">
-              <button onClick={() => setShowNoBidModal(false)} className="py-4 rounded-2xl border border-slate-200 font-black text-slate-400 uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all">Cancel</button>
-              <button onClick={handleSetNoBid} className="py-4 rounded-2xl bg-red-600 text-white font-black uppercase text-[10px] tracking-widest shadow-xl hover:bg-red-700 transition-all">Confirm No-Bid</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showOutcomeModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left">
-          <div className="bg-white rounded-[3rem] w-full max-w-xl p-10 shadow-2xl animate-in zoom-in duration-300">
-            <div className="flex items-center gap-4 mb-8">
-              <div className={clsx("p-4 rounded-3xl", showOutcomeModal === 'Won' ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600")}>
-                {showOutcomeModal === 'Won' ? <Award size={32} /> : <ThumbsDown size={32} />}
-              </div>
-              <div><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Bid Outcome: {showOutcomeModal}</h3><p className="text-sm font-medium text-slate-500">Record learnings.</p></div>
-            </div>
-            <div className="space-y-6">
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Learnings</label>
-                <textarea value={learnings} onChange={e => setLearnings(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-3xl p-6 text-sm font-medium outline-none transition-all" placeholder="Notes..." rows={4} />
+              <div className="grid grid-cols-2 gap-4 mt-10">
+                <button onClick={() => setShowNoBidModal(false)} className="py-4 rounded-2xl border border-slate-200 font-black text-slate-400 uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all">Cancel</button>
+                <button onClick={handleSetNoBid} className="py-4 rounded-2xl bg-red-600 text-white font-black uppercase text-[10px] tracking-widest shadow-xl hover:bg-red-700 transition-all">Confirm No-Bid</button>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4 mt-10">
-              <button onClick={() => setShowOutcomeModal(null)} className="py-4 rounded-2xl border border-slate-200 font-black text-slate-400 uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all">Cancel</button>
-              <button onClick={() => handleSetOutcome(showOutcomeModal)} className={clsx("py-4 rounded-2xl text-white font-black uppercase text-[10px] tracking-widest shadow-xl transition-all", showOutcomeModal === 'Won' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100" : "bg-red-600 hover:bg-red-700 shadow-red-100")}>Save Outcome</button>
-            </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
-      {deletingAssetId && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2.5rem] w-full max-sm p-10 shadow-2xl text-center">
-            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6"><Trash2 size={32} /></div>
-            <h3 className="text-xl font-black text-slate-900 uppercase mb-2">Delete File?</h3>
-            <div className="grid grid-cols-2 gap-4 mt-10">
-              <button onClick={() => setDeletingAssetId(null)} className="py-4 bg-slate-100 text-slate-500 font-black uppercase text-[10px] rounded-xl hover:bg-slate-200 transition-all">Cancel</button>
-              <button onClick={handleDeleteAsset} className="py-4 bg-red-600 text-white font-black uppercase text-[10px] rounded-xl shadow-lg hover:bg-red-700 transition-all">Delete</button>
+      {
+        showOutcomeModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left">
+            <div className="bg-white rounded-[3rem] w-full max-w-xl p-10 shadow-2xl animate-in zoom-in duration-300">
+              <div className="flex items-center gap-4 mb-8">
+                <div className={clsx("p-4 rounded-3xl", showOutcomeModal === 'Won' ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600")}>
+                  {showOutcomeModal === 'Won' ? <Award size={32} /> : <ThumbsDown size={32} />}
+                </div>
+                <div><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Bid Outcome: {showOutcomeModal}</h3><p className="text-sm font-medium text-slate-500">Record learnings.</p></div>
+              </div>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Learnings</label>
+                  <textarea value={learnings} onChange={e => setLearnings(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-3xl p-6 text-sm font-medium outline-none transition-all" placeholder="Notes..." rows={4} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 mt-10">
+                <button onClick={() => setShowOutcomeModal(null)} className="py-4 rounded-2xl border border-slate-200 font-black text-slate-400 uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all">Cancel</button>
+                <button onClick={() => handleSetOutcome(showOutcomeModal)} className={clsx("py-4 rounded-2xl text-white font-black uppercase text-[10px] tracking-widest shadow-xl transition-all", showOutcomeModal === 'Won' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100" : "bg-red-600 hover:bg-red-700 shadow-red-100")}>Save Outcome</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
+
+      {
+        deletingAssetId && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+            <div className="bg-white rounded-[2.5rem] w-full max-sm p-10 shadow-2xl text-center">
+              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6"><Trash2 size={32} /></div>
+              <h3 className="text-xl font-black text-slate-900 uppercase mb-2">Delete File?</h3>
+              <div className="grid grid-cols-2 gap-4 mt-10">
+                <button onClick={() => setDeletingAssetId(null)} className="py-4 bg-slate-100 text-slate-500 font-black uppercase text-[10px] rounded-xl hover:bg-slate-200 transition-all">Cancel</button>
+                <button onClick={handleDeleteAsset} className="py-4 bg-red-600 text-white font-black uppercase text-[10px] rounded-xl shadow-lg hover:bg-red-700 transition-all">Delete</button>
+              </div>
+            </div>
+          </div>
+        )
+      }
     </div>
   );
 };
@@ -995,13 +1311,64 @@ const CompactChecklist: React.FC<{ title: string; items: any[]; icon: React.Reac
   </div>
 );
 
-const StageSection: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode }> = ({ title, icon, children }) => (
-  <div className="bg-white rounded-[3rem] shadow-sm border border-slate-200 overflow-hidden">
-    <div className="px-10 py-8 border-b border-slate-100 bg-slate-50/50 flex items-center gap-4 text-left">
-      <div className="p-3 bg-white rounded-2xl shadow-sm">{icon}</div>
-      <div><h3 className="text-xl font-black text-slate-900 uppercase tracking-tight leading-none">{title}</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Governance Point</p></div>
+const DetailedChecklistCard: React.FC<{
+  item: any;
+  type: 'compliance' | 'technical';
+  onToggle: () => void;
+  readOnly?: boolean;
+}> = ({ item, type, onToggle, readOnly }) => {
+  const isComplete = item.status === 'Complete';
+
+  return (
+    <div
+      onClick={() => !readOnly && onToggle()}
+      className={clsx(
+        "bg-white rounded-[1.5rem] p-6 border transition-all flex flex-col gap-4 group relative",
+        !readOnly && "cursor-pointer hover:shadow-lg hover:border-slate-300",
+        isComplete ? "border-emerald-100 bg-emerald-50/20" : "border-slate-100 shadow-sm"
+      )}
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className={clsx(
+            "w-6 h-6 rounded-lg border flex items-center justify-center transition-all",
+            isComplete ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-200 bg-white"
+          )}>
+            {isComplete && <CheckCircle2 size={14} />}
+          </div>
+          <h4 className={clsx(
+            "text-sm font-black tracking-tight leading-tight",
+            isComplete ? "text-emerald-900" : "text-slate-800"
+          )}>
+            {item.requirement}
+          </h4>
+        </div>
+        <div className={clsx(
+          "px-3 py-1 rounded-lg text-[9px] font-black tracking-widest",
+          isComplete ? "bg-emerald-100 text-emerald-600" : "bg-amber-50 text-amber-500"
+        )}>
+          {item.status === 'Complete' ? 'Complete' : 'Pending'}
+        </div>
+      </div>
+
+      <div className="bg-white/50 rounded-xl p-4 border border-slate-50 min-h-[80px]">
+        <p className="text-[11px] font-medium text-slate-500 leading-relaxed italic">
+          {item.aiComment || item.description || "No detailed description available."}
+        </p>
+      </div>
     </div>
-    <div className="p-10">{children}</div>
+  );
+};
+
+const StageSection: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode }> = ({ title, icon, children }) => (
+  <div className="space-y-6">
+    <div className="flex items-center gap-3 px-2">
+      <div className="p-2 bg-white rounded-xl shadow-sm border border-slate-100">
+        {React.cloneElement(icon as React.ReactElement, { size: 18 })}
+      </div>
+      <h3 className="text-sm font-black text-slate-900 tracking-widest">{title}</h3>
+    </div>
+    {children}
   </div>
 );
 
@@ -1012,10 +1379,10 @@ const SummaryItem: React.FC<{ label: string; value: string; color?: string }> = 
   </div>
 );
 
-const UploadPortal: React.FC<{ onClick: () => void; title: string; desc: string; loading?: boolean; icon: React.ReactNode }> = ({ onClick, title, desc, loading, icon }) => (
+const UploadPortal: React.FC<{ onClick: () => void; title: string; desc: string; loading?: boolean; status?: string | null; icon: React.ReactNode }> = ({ onClick, title, desc, loading, status, icon }) => (
   <div onClick={onClick} className="group bg-white rounded-[2.5rem] border-2 border-dashed border-slate-200 p-10 text-center hover:border-[#D32F2F] hover:bg-red-50/20 shadow-sm transition-all cursor-pointer active:scale-95">
     <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 group-hover:bg-white transition-all shadow-inner">{loading ? <Loader2 className="animate-spin text-[#D32F2F]" size={32} /> : icon}</div>
-    <h4 className="text-lg font-black text-slate-900 uppercase mb-2 tracking-tight group-hover:text-red-700">{title}</h4>
+    <h4 className="text-lg font-black text-slate-900 uppercase mb-2 tracking-tight group-hover:text-red-700">{loading && status ? status : title}</h4>
     <p className="text-xs text-slate-400 font-bold uppercase tracking-widest leading-relaxed">{desc}</p>
   </div>
 );
@@ -1026,5 +1393,103 @@ const StatBox: React.FC<{ label: string; value: string; color: string }> = ({ la
     <p className={clsx("text-sm font-black truncate", color)}>{value}</p>
   </div>
 );
+
+const SolutionAnalysisView: React.FC<{ analysis: string | null; isLoading: boolean }> = ({ analysis, isLoading }) => {
+  if (isLoading) return null;
+
+  if (!analysis) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full py-12 opacity-60">
+        <Sparkles size={32} className="text-slate-300 mb-3" />
+        <p className="text-xs font-black uppercase tracking-widest text-slate-400">Ready for Analysis</p>
+      </div>
+    );
+  }
+
+  let data: any;
+  try {
+    data = JSON.parse(analysis);
+  } catch (e) {
+    return (
+      <div className="space-y-3 p-4">
+        {analysis.split('\n').filter(l => l.trim()).map((line, i) => (
+          <p key={i} className="text-sm font-medium text-slate-600 leading-relaxed">{line.replace(/^[•\-\*]\s*/, '')}</p>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 p-2">
+      {/* Header - Fit Status */}
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className={clsx(
+              "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider border flex items-center gap-2",
+              data.solutionFit === 'Yes' ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                data.solutionFit === 'Partial' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                  "bg-red-50 text-red-600 border-red-100"
+            )}>
+              {data.solutionFit === 'Yes' ? <CheckCircle2 size={12} /> : data.solutionFit === 'Partial' ? <AlertTriangle size={12} /> : <XCircle size={12} />}
+              Solution Fit: {data.solutionFit}
+            </div>
+          </div>
+          {data.fitExplanation && <p className="text-sm text-slate-600 leading-relaxed max-w-2xl">{data.fitExplanation}</p>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* Gap Analysis */}
+        {data.gapAnalysis && data.gapAnalysis.length > 0 ? (
+          <div className="space-y-4">
+            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+              <AlertCircle size={14} className="text-red-400" /> Gap Analysis
+            </h5>
+            <div className="space-y-3">
+              {data.gapAnalysis.map((gap: any, idx: number) => (
+                <div key={idx} className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm hover:shadow-md transition-all group">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase">{gap.component}</span>
+                    <span className={clsx("text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                      gap.impact === 'High' ? "bg-red-50 text-red-500" : "bg-slate-100 text-slate-500")}>
+                      {gap.impact} Priority
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">{gap.gap}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="p-6 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex items-center gap-4 text-emerald-700">
+            <CheckCircle2 size={24} />
+            <div>
+              <p className="text-xs font-black uppercase tracking-widest">No Gaps Detected</p>
+              <p className="text-[10px] opacity-70">Solution aligns perfectly with SOW.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Recommendations */}
+        {data.recommendations && data.recommendations.length > 0 && (
+          <div className="space-y-4">
+            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+              <Sparkles size={14} className="text-[#D32F2F]" /> Strategic Advice
+            </h5>
+            <div className="bg-slate-50 rounded-[2rem] p-6 border border-slate-100 space-y-4">
+              {data.recommendations.map((rec: string, idx: number) => (
+                <div key={idx} className="flex gap-4 items-start">
+                  <div className="w-6 h-6 rounded-full bg-white border border-slate-100 flex items-center justify-center shrink-0 shadow-sm text-blue-500 font-bold text-[10px]">{idx + 1}</div>
+                  <p className="text-xs text-slate-600 font-medium leading-relaxed pt-0.5">{rec}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export default BidLifecycle;

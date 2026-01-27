@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, X, Loader2, Sparkles, CheckCircle, Info, Trash2, ChevronDown, ShieldCheck, Briefcase, Globe, MapPin, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Upload, X, Loader2, Sparkles, CheckCircle, Info, Trash2, ChevronDown, ShieldCheck, Briefcase, Globe, MapPin, AlertCircle, AlertTriangle, CheckSquare, FileSpreadsheet, Package } from 'lucide-react';
 import { BidRecord, BidStage, BidStatus, RiskLevel, ComplianceItem, QualificationItem, TechnicalDocument } from '../types.ts';
 import { analyzeBidDocument } from '../services/gemini.ts';
 import { SOLUTION_OPTIONS } from '../constants.tsx';
@@ -32,6 +32,16 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
     region: 'North',
     contractDuration: '',
     customerPaymentTerms: '',
+    publishDate: new Date().toISOString().split('T')[0],
+    complexity: 'Medium',
+    preBidMeeting: {
+      date: '',
+      time: '',
+      location: '',
+      isMandatory: false,
+      notes: ''
+    },
+    deliverablesSummary: [],
     financialFormats: [],
     technicalDocuments: []
   });
@@ -68,14 +78,16 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
             );
           }).filter((sol: string | undefined): sol is string => Boolean(sol));
 
-          const extractedCompliance: ComplianceItem[] = (result.complianceList || []).map((item: any) => ({
+          const extractedCompliance: ComplianceItem[] = (result.complianceList || []).map((item: any, idx: number) => ({
+            id: `comp-${Date.now()}-${idx}`,
             requirement: item.requirement,
             status: 'Pending',
             isMandatory: item.isMandatory,
             aiComment: item.description
           }));
 
-          const extractedQualChecklist: QualificationItem[] = (result.technicalQualificationChecklist || []).map((item: any) => ({
+          const extractedQualChecklist: QualificationItem[] = (result.technicalQualificationChecklist || []).map((item: any, idx: number) => ({
+            id: `qual-${Date.now()}-${idx}`,
             requirement: item.requirement,
             type: (item.type || 'Mandatory') as QualificationItem['type'],
             status: 'Pending',
@@ -109,6 +121,10 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
             contractDuration: result.contractDuration || prev.contractDuration || '',
             customerPaymentTerms: result.customerPaymentTerms || prev.customerPaymentTerms || '',
             financialFormats: result.financialFormats || prev.financialFormats || [],
+            publishDate: result.publishDate || prev.publishDate,
+            complexity: (result.complexity as any) || prev.complexity,
+            preBidMeeting: result.preBidMeeting || prev.preBidMeeting,
+            deliverablesSummary: result.deliverablesSummary || prev.deliverablesSummary || [],
             technicalDocuments: [tenderDoc]
           }));
 
@@ -193,6 +209,10 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
       region: (formData.region as any) || 'North',
       contractDuration: formData.contractDuration,
       customerPaymentTerms: formData.customerPaymentTerms,
+      publishDate: formData.publishDate || new Date().toISOString().split('T')[0],
+      complexity: formData.complexity || 'Medium',
+      preBidMeeting: formData.preBidMeeting,
+      deliverablesSummary: formData.deliverablesSummary,
       managementApprovalStatus: 'Pending',
       pricingApprovalStatus: 'Pending'
     };
@@ -280,6 +300,21 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <InputField label="Submission Deadline*" type="date" value={formData.deadline} error={errors.deadline} onChange={v => { setFormData({ ...formData, deadline: v }); if (v) setErrors(p => ({ ...p, deadline: false })); }} />
+            <InputField label="Publish Date*" type="date" value={formData.publishDate} onChange={v => setFormData({ ...formData, publishDate: v })} />
+            <div>
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 ml-1">Complexity*</label>
+              <div className="relative">
+                <select value={formData.complexity} onChange={e => setFormData({ ...formData, complexity: e.target.value as any })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-[#D32F2F] appearance-none outline-none">
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <InputField label="Contract Duration*" value={formData.contractDuration} error={errors.contractDuration} onChange={v => { setFormData({ ...formData, contractDuration: v }); if (v) setErrors(p => ({ ...p, contractDuration: false })); }} placeholder="e.g. 24 Months" />
             <InputField label="Payment Terms (Net Days)*" value={formData.customerPaymentTerms} onChange={v => setFormData({ ...formData, customerPaymentTerms: v })} placeholder="e.g. 45" />
           </div>
@@ -291,6 +326,65 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
             </div>
             <InputField label="Currency*" value={formData.currency} onChange={v => setFormData({ ...formData, currency: v })} />
             <InputField label="Bid Security*" value={formData.bidSecurity} error={errors.bidSecurity} onChange={v => { setFormData({ ...formData, bidSecurity: v }); if (v) setErrors(p => ({ ...p, bidSecurity: false })); }} placeholder="Amount or %" />
+          </div>
+
+          <div className="bg-amber-50/50 rounded-2xl p-6 border border-amber-100 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-black text-amber-600 uppercase tracking-widest flex items-center gap-2">
+                <MapPin size={14} /> Pre-Bid Meeting Info
+              </h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.preBidMeeting?.isMandatory}
+                  onChange={e => setFormData({
+                    ...formData,
+                    preBidMeeting: { ...formData.preBidMeeting!, isMandatory: e.target.checked }
+                  })}
+                  className="w-4 h-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                />
+                <span className="text-[10px] font-black text-amber-600 uppercase">Mandatory</span>
+              </label>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <InputField
+                label="Meeting Date"
+                type="date"
+                value={formData.preBidMeeting?.date}
+                onChange={v => setFormData({
+                  ...formData,
+                  preBidMeeting: { ...formData.preBidMeeting!, date: v }
+                })}
+              />
+              <InputField
+                label="Meeting Time"
+                type="time"
+                value={formData.preBidMeeting?.time}
+                onChange={v => setFormData({
+                  ...formData,
+                  preBidMeeting: { ...formData.preBidMeeting!, time: v }
+                })}
+              />
+              <InputField
+                label="Location / Link"
+                value={formData.preBidMeeting?.location}
+                onChange={v => setFormData({
+                  ...formData,
+                  preBidMeeting: { ...formData.preBidMeeting!, location: v }
+                })}
+                placeholder="Address or URL"
+              />
+            </div>
+            <textarea
+              value={formData.preBidMeeting?.notes || ''}
+              onChange={e => setFormData({
+                ...formData,
+                preBidMeeting: { ...formData.preBidMeeting!, notes: e.target.value }
+              })}
+              rows={2}
+              className="w-full bg-white border border-amber-100 rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-amber-500 outline-none transition-all"
+              placeholder="Meeting objectives or dial-in notes..."
+            />
           </div>
 
           <div className="space-y-6">
@@ -340,14 +434,89 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
                   <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">Analyzing Document...</p>
                 </div>
               ) : formData.aiQualificationSummary ? (
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 animate-in fade-in zoom-in duration-500">
-                  <p className="text-xs text-slate-700 leading-relaxed font-bold">{formData.aiQualificationSummary}</p>
-                  <div className="pt-4 border-t border-slate-50 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="text-emerald-500" size={14} />
-                      <span className="text-[10px] font-black text-emerald-600 uppercase">Parameters Verified</span>
+                <div className="space-y-4 animate-in fade-in zoom-in duration-500">
+                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                    <p className="text-xs text-slate-700 leading-relaxed font-bold">{formData.aiQualificationSummary}</p>
+                    <div className="pt-4 border-t border-slate-50 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="text-emerald-500" size={14} />
+                        <span className="text-[10px] font-black text-emerald-600 uppercase">Analysis Complete</span>
+                      </div>
                     </div>
                   </div>
+
+                  {/* Technical Compliance Preview */}
+                  {formData.technicalQualificationChecklist && formData.technicalQualificationChecklist.length > 0 && (
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <CheckSquare className="text-amber-500" size={12} /> Technical Compliance ({formData.technicalQualificationChecklist.length})
+                      </h4>
+                      <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2 scrollbar-hide">
+                        {formData.technicalQualificationChecklist.map((item, idx) => (
+                          <div key={idx} className="p-3 bg-slate-50 rounded-xl border border-slate-100 group hover:border-amber-200 transition-colors">
+                            <p className="text-[10px] font-bold text-slate-700 leading-tight">{item.requirement}</p>
+                            <span className="text-[8px] font-black uppercase text-slate-400 mt-1 block">{item.type}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* General Compliance Preview */}
+                  {formData.complianceChecklist && formData.complianceChecklist.length > 0 && (
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <ShieldCheck className="text-blue-500" size={12} /> General Compliance ({formData.complianceChecklist.length})
+                      </h4>
+                      <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2 scrollbar-hide">
+                        {formData.complianceChecklist.map((item, idx) => (
+                          <div key={idx} className="p-3 bg-slate-50 rounded-xl border border-slate-100 group hover:border-blue-200 transition-colors">
+                            <p className="text-[10px] font-bold text-slate-700 leading-tight">{item.requirement}</p>
+                            {item.isMandatory && <span className="text-[8px] font-black uppercase text-red-500 mt-1 block">Mandatory</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* BOQ Preview */}
+                  {formData.financialFormats && formData.financialFormats.length > 0 && (
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <FileSpreadsheet className="text-indigo-500" size={12} /> Pricing BOQ ({formData.financialFormats.length})
+                      </h4>
+                      <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2 scrollbar-hide text-left">
+                        {formData.financialFormats.map((item, idx) => (
+                          <div key={idx} className="p-3 bg-slate-50 rounded-xl border border-slate-100 group hover:border-indigo-200 transition-colors">
+                            <p className="text-[10px] font-bold text-slate-700 leading-tight uppercase">{item.item}</p>
+                            <div className="flex justify-between items-center mt-1">
+                              <span className="text-[8px] font-black uppercase text-slate-400">{item.uom}</span>
+                              <span className="text-[10px] font-black text-indigo-600">Qty: {item.quantity}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* Key Deliverables Preview */}
+                  {formData.deliverablesSummary && formData.deliverablesSummary.length > 0 && (
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <Package className="text-[#D32F2F]" size={12} /> Key Deliverables ({formData.deliverablesSummary.length})
+                      </h4>
+                      <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2 scrollbar-hide text-left">
+                        {formData.deliverablesSummary.map((item, idx) => (
+                          <div key={idx} className="p-3 bg-slate-50 rounded-xl border border-slate-100 group hover:border-red-200 transition-colors">
+                            <div className="flex justify-between items-start">
+                              <p className="text-[10px] font-bold text-slate-700 leading-tight uppercase">{item.item}</p>
+                              <span className="text-[10px] font-black text-[#D32F2F]">Qty: {item.quantity}</span>
+                            </div>
+                            {item.specs && <p className="text-[9px] text-slate-400 mt-1 font-medium italic">{item.specs}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-24 text-slate-300 flex flex-col items-center">

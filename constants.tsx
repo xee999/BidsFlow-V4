@@ -1,10 +1,10 @@
 import React from 'react';
-import { 
-  LayoutDashboard, 
-  FileText, 
-  CheckCircle2, 
-  BarChart3, 
-  AlertTriangle, 
+import {
+  LayoutDashboard,
+  FileText,
+  CheckCircle2,
+  BarChart3,
+  AlertTriangle,
   Settings,
   Archive,
   Edit3,
@@ -30,7 +30,8 @@ export const SOLUTION_OPTIONS = [
   'Mobile Devices (Phone or Tablet)',
   'CPaaS',
   'Cloud Solutions',
-  'Fixed Connectivity'
+  'Fixed Connectivity',
+  'System Integration'
 ];
 
 export const NAV_ITEMS = [

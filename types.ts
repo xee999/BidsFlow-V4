@@ -24,6 +24,21 @@ export enum RiskLevel {
 
 export type ApprovingAuthorityRole = 'Manager Finance' | 'CFO' | 'CBO' | 'PriceCo';
 
+export interface PreBidMeeting {
+  date: string;
+  time: string;
+  location: string;
+  isMandatory: boolean;
+  notes?: string;
+}
+
+export interface Deliverable {
+  item: string;
+  quantity: string;
+  specs?: string;
+  category?: string;
+}
+
 export interface ProposalSection {
   id: string;
   title: string;
@@ -43,6 +58,7 @@ export interface FinancialFormat {
 }
 
 export interface ComplianceItem {
+  id: string;
   requirement: string;
   status: 'Pending' | 'Complete';
   isMandatory?: boolean;
@@ -52,28 +68,29 @@ export interface ComplianceItem {
 }
 
 export interface QualificationItem {
+  id: string;
   requirement: string;
   type: 'Mandatory' | 'Required' | 'Optional';
   status: 'Pending' | 'Complete';
   aiComment?: string;
 }
 
-export type VaultCategory = 
-  | 'All Documents' 
-  | 'Case Studies' 
-  | 'Past Proposals' 
-  | 'Templates' 
-  | 'Credentials' 
-  | 'Boilerplate' 
-  | 'Staff Resumes' 
-  | 'POs & Contracts' 
-  | 'Legal & Tax' 
+export type VaultCategory =
+  | 'All Documents'
+  | 'Case Studies'
+  | 'Past Proposals'
+  | 'Templates'
+  | 'Credentials'
+  | 'Boilerplate'
+  | 'Staff Resumes'
+  | 'POs & Contracts'
+  | 'Legal & Tax'
   | 'Customer Acknowledgments';
 
 export interface TechnicalDocument {
   id: string;
   name: string;
-  type: string; 
+  type: string;
   category: VaultCategory | 'Technical' | 'Financial' | 'Compliance' | 'Forms' | 'Tender';
   uploadDate: string;
   aiScore?: number;
@@ -85,7 +102,7 @@ export interface TechnicalDocument {
   tags?: string[];
   summary?: string;
   winRate?: string;
-  fileData?: string; 
+  fileData?: string;
   fileSize?: string;
   timesUsed?: number;
   lastModified?: string;
@@ -169,8 +186,8 @@ export interface BidRecord {
   pricingApprovalStatus?: 'Pending' | 'Submitted' | 'Approved';
   approvingAuthorityRole?: ApprovingAuthorityRole;
   approvingAuthority?: string;
-  approvalRequestedDate?: string; 
-  managementApprovalDate?: string; 
+  approvalRequestedDate?: string;
+  managementApprovalDate?: string;
   identifiedRisks?: BidRisk[];
   mitigationPlan?: string[];
   strategicRiskAssessment?: StrategicRiskReport;
@@ -180,6 +197,10 @@ export interface BidRecord {
   qualifyingFactors?: string[];
   disqualifyingFactors?: string[];
   aiConfidenceScore?: number;
+  publishDate?: string;
+  complexity?: 'Low' | 'Medium' | 'High';
+  preBidMeeting?: PreBidMeeting;
+  deliverablesSummary?: Deliverable[];
   integrityScoreBreakdown?: {
     technicalWeight: number;
     complianceWeight: number;
