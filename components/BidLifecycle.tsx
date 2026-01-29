@@ -10,17 +10,22 @@ import {
   Activity, Calculator, Lock, Archive, Tag, Trash2, Flag, Award, ThumbsUp,
   MapPin, Banknote, Landmark
 } from 'lucide-react';
-import { BidRecord, BidStage, BidStatus, TechnicalDocument, StageTransition, ComplianceItem, QualificationItem, RiskLevel, FinancialFormat, ApprovingAuthorityRole } from '../types.ts';
+import { BidRecord, BidStage, BidStatus, TechnicalDocument, StageTransition, ComplianceItem, QualificationItem, RiskLevel, FinancialFormat, ApprovingAuthorityRole, ActivityLog, User } from '../types.ts';
 import { STAGE_ICONS } from '../constants.tsx';
+import { convertToDays, convertToYears, sanitizeDateValue, sanitizeTimeValue } from '../services/utils.ts';
 import JSZip from 'jszip';
-import { analyzePricingDocument, analyzeComplianceDocuments, generateFinalRiskAssessment, generateStrategicRiskAssessment, analyzeSolutioningDocuments, analyzeBidSecurityDocument, tagTechnicalDocuments } from '../services/gemini.ts';
+import { analyzePricingDocument, analyzeComplianceDocuments, generateFinalRiskAssessment, generateStrategicRiskAssessment, analyzeSolutioningDocuments, analyzeBidSecurityDocument, tagTechnicalDocuments, analyzeBidDocument } from '../services/gemini.ts';
 import FloatingAIChat from './FloatingAIChat.tsx';
 import { clsx } from 'clsx';
+import { auditActions } from '../services/auditService.ts';
 
 interface BidLifecycleProps {
   bid: BidRecord;
   onUpdate: (updatedBid: BidRecord) => void;
   onClose: () => void;
+  userRole?: string;
+  addAuditLog?: (log: ActivityLog) => void;
+  currentUser?: User;
 }
 
 const COMMON_NO_BID_REASONS = [
@@ -34,7 +39,52 @@ const COMMON_NO_BID_REASONS = [
   'Missing Credentials'
 ];
 
-const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) => {
+// Phase weights by complexity (total = 100%)
+// Compliance reduced per team feedback: High=1.5d, Medium=1d, Low=0.5d (on ~20d bid)
+// Saved time added to Solutioning
+const PHASE_WEIGHTS: Record<string, Record<string, number>> = {
+  High: { Intake: 0.01, Qualification: 0.05, Solutioning: 0.605, Pricing: 0.25, Compliance: 0.075, 'Final Review': 0.02 },
+  Medium: { Intake: 0.02, Qualification: 0.08, Solutioning: 0.58, Pricing: 0.25, Compliance: 0.05, 'Final Review': 0.02 },
+  Low: { Intake: 0.05, Qualification: 0.10, Solutioning: 0.555, Pricing: 0.25, Compliance: 0.025, 'Final Review': 0.02 }
+};
+
+// Calculate target days for each phase based on available time and complexity
+// Rounds to 0.5 day increments (e.g., 1, 1.5, 2, 2.5)
+const calculatePhaseTargets = (deadline: string, receivedDate: string, complexity: string = 'Medium'): Record<string, number> => {
+  const deadlineDate = new Date(deadline);
+  const startDate = new Date(receivedDate);
+  deadlineDate.setHours(0, 0, 0, 0);
+  startDate.setHours(0, 0, 0, 0);
+  // T-2: Reserve 2 days before deadline (1 for final review buffer + 1 for submission)
+  const availableDays = Math.max(1, Math.ceil((deadlineDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) - 2);
+  const weights = PHASE_WEIGHTS[complexity] || PHASE_WEIGHTS.Medium;
+  const targets: Record<string, number> = {};
+  for (const [stage, weight] of Object.entries(weights)) {
+    // Round to nearest 0.5
+    const rawDays = availableDays * weight;
+    targets[stage] = Math.max(0.5, Math.round(rawDays * 2) / 2);
+  }
+  return targets;
+};
+
+// Calculate elapsed days in current phase
+const getPhaseElapsedDays = (stageHistory: { stage: string; timestamp: string }[], currentStage: string): number => {
+  const entry = stageHistory.find(h => h.stage === currentStage);
+  if (!entry) return 0;
+  const startDate = new Date(entry.timestamp);
+  const now = new Date();
+  return Math.max(0, parseFloat(((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)).toFixed(1)));
+};
+
+// Determine timing status
+const getTimingStatus = (elapsed: number, target: number): { status: 'ahead' | 'on-track' | 'behind'; color: string } => {
+  const diff = elapsed - target;
+  if (diff <= -0.5) return { status: 'ahead', color: 'bg-emerald-50 text-emerald-600 border-emerald-200' };
+  if (diff <= 0.5) return { status: 'on-track', color: 'bg-amber-50 text-amber-600 border-amber-200' };
+  return { status: 'behind', color: 'bg-red-50 text-red-600 border-red-200' };
+};
+
+const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, userRole, addAuditLog, currentUser }) => {
   const [viewingStage, setViewingStage] = useState<BidStage>(bid.currentStage);
   const [showNoBidModal, setShowNoBidModal] = useState(false);
   const [showOutcomeModal, setShowOutcomeModal] = useState<'Won' | 'Lost' | null>(null);
@@ -64,6 +114,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
     annexure: useRef<HTMLInputElement>(null),
     supporting: useRef<HTMLInputElement>(null),
     bidSecurity: useRef<HTMLInputElement>(null),
+    preBidDate: useRef<HTMLInputElement>(null),
   };
 
   const stagesOrder = [
@@ -112,6 +163,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
   const handleProgressStage = () => {
     const nextIdx = currentOfficialIndex + 1;
     if (nextIdx < stagesOrder.length) {
+      const prevStage = bid.currentStage;
       const nextStage = stagesOrder[nextIdx];
       const newHistory: StageTransition[] = [
         ...(bid.stageHistory || []),
@@ -119,6 +171,19 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
       ];
       onUpdate({ ...bid, currentStage: nextStage, stageHistory: newHistory });
       setViewingStage(nextStage);
+
+      // Log stage transition
+      if (addAuditLog && currentUser) {
+        const log = auditActions.stageChanged(
+          currentUser.name,
+          currentUser.role,
+          bid.projectName,
+          bid.id,
+          prevStage,
+          nextStage
+        );
+        addAuditLog(log);
+      }
     }
   };
 
@@ -128,8 +193,9 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
   };
 
   const formatSimpleDate = (isoString?: string) => {
-    if (!isoString) return '';
+    if (!isoString || isoString === 'N/A' || isoString === 'null') return '';
     const date = new Date(isoString);
+    if (isNaN(date.getTime())) return '';
     const day = date.getDate();
     const month = date.getMonth() + 1;
     const year = date.getFullYear();
@@ -223,7 +289,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
             tags: ['Bank Guarantee', 'Mandatory', result.isAmountCorrect ? 'Verified Amount' : 'Amount Error'],
             aiMatchDetails: JSON.stringify({
               bank: result.bankName,
-              date: result.issuanceDate,
+              date: sanitizeDateValue(result.issuanceDate),
               amount: result.amount,
               beneficiary: result.beneficiaryName,
               isAmtOk: result.isAmountCorrect,
@@ -321,6 +387,51 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
             ...(bid.technicalQualificationChecklist || []).map(t => ({ id: t.id, requirement: t.requirement, category: 'Technical' }))
           ];
 
+          // If checklists are empty, try to find an RFP/Tender document in the zip to extract them
+          if (checklistItems.length === 0) {
+            setScanningStatus("Detecting RFP for Checklist Extraction...");
+            const rfpFile = extractedDocs.find(d =>
+              d.name.toLowerCase().includes('rfp') ||
+              d.name.toLowerCase().includes('tender') ||
+              d.name.toLowerCase().includes('solicitation') ||
+              d.name.toLowerCase().includes('agreement')
+            ) || extractedDocs[0]; // Fallback to first file
+
+            if (rfpFile && rfpFile.fileData) {
+              try {
+                const extraction = await analyzeBidDocument(rfpFile.name, rfpFile.fileData);
+                if (extraction) {
+                  const newComp = (extraction.complianceList || []).map((item: any, idx: number) => ({
+                    id: `comp-zip-${Date.now()}-${idx}`,
+                    requirement: item.requirement,
+                    status: 'Pending',
+                    isMandatory: item.isMandatory,
+                    aiComment: item.description
+                  }));
+                  const newTech = (extraction.technicalQualificationChecklist || []).map((item: any, idx: number) => ({
+                    id: `qual-zip-${Date.now()}-${idx}`,
+                    requirement: item.requirement,
+                    type: (item.type || 'Mandatory') as any,
+                    status: 'Pending',
+                    aiComment: item.aiComment
+                  }));
+
+                  // Update local list for deep scanning
+                  checklistItems.push(...newComp.map((c: any) => ({ id: c.id, requirement: c.requirement, category: 'Compliance' })));
+                  checklistItems.push(...newTech.map((t: any) => ({ id: t.id, requirement: t.requirement, category: 'Technical' })));
+
+                  // Update bid state for next step
+                  updatedDocsBid.complianceChecklist = newComp;
+                  updatedDocsBid.technicalQualificationChecklist = newTech;
+                  updatedDocsBid.summaryRequirements = extraction.summaryRequirements || updatedDocsBid.summaryRequirements;
+                  updatedDocsBid.scopeOfWork = extraction.scopeOfWork || updatedDocsBid.scopeOfWork;
+                }
+              } catch (e) {
+                console.warn("Checklist extraction from zip failed", e);
+              }
+            }
+          }
+
           if (checklistItems.length > 0) {
             const criteria = bid.summaryRequirements || `Compliance evaluation for ${bid.projectName} with ${bid.customerName}.`;
             // USE extractedDocs explicitly to ensure they are scanned if total docs is large? 
@@ -328,7 +439,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
             const complianceResult = await analyzeComplianceDocuments(criteria, checklistItems, currentBidDocs);
 
             if (complianceResult?.updatedChecklist) {
-              console.log("Compliance Extraction Success:", complianceResult.updatedChecklist.length);
+
               let updatedCompliance = [...(bid.complianceChecklist || [])];
               let updatedTechnical = [...(bid.technicalQualificationChecklist || [])];
 
@@ -337,7 +448,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                   const complianceIdx = updatedCompliance.findIndex(c => c.id === aiItem.id);
                   const technicalIdx = updatedTechnical.findIndex(t => t.id === aiItem.id);
 
-                  console.log(`Processing AI Item: ${aiItem.id} | Compliance Match: ${complianceIdx} | Technical Match: ${technicalIdx}`);
+
 
                   if (complianceIdx !== -1) {
                     updatedCompliance[complianceIdx] = { ...updatedCompliance[complianceIdx], status: 'Complete', aiComment: aiItem.aiComment };
@@ -378,7 +489,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
         let updatedBid = { ...bid };
         if (category === 'Pricing') {
           setScanningStatus("Analyzing Pricing Proposal...");
-          const result = await analyzePricingDocument(base64, bid.contractDuration || "12 Months", bid.financialFormats || [], file.type);
+          const result = await analyzePricingDocument(base64, bid.contractDuration || "365", bid.financialFormats || [], file.type);
           if (result) {
             let updatedFormats: FinancialFormat[] = [];
 
@@ -446,7 +557,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
               tcvExclTax: totalExcl,
               tcvInclTax: totalExcl * 1.17, // Assuming 17% tax
               vendorPaymentTerms: result.vendorPaymentTerms,
-              contractDuration: result.contractDuration || bid.contractDuration,
+              contractDuration: convertToYears(result.contractDuration || bid.contractDuration),
               customerPaymentTerms: result.customerPaymentTerms || bid.customerPaymentTerms
             };
           }
@@ -485,7 +596,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
           let updatedTechnical = [...(bid.technicalQualificationChecklist || [])];
 
           if (result?.updatedChecklist) {
-            console.log("Compliance Audit Result (Single File):", result.updatedChecklist);
+
 
             result.updatedChecklist.forEach((aiItem: any) => {
               if (aiItem.status === 'Complete' && aiItem.id) {
@@ -717,7 +828,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
           </div>
 
           <div className="flex items-center gap-4 shrink-0">
-            {viewingStage === bid.currentStage && viewingStage !== BidStage.FINAL_REVIEW && (
+            {viewingStage === bid.currentStage && viewingStage !== BidStage.FINAL_REVIEW && userRole !== 'VIEWER' && (
               <button
                 onClick={handleProgressStage}
                 className="px-6 py-2.5 text-[10px] font-black text-white bg-emerald-600 rounded-xl uppercase tracking-widest shadow-lg shadow-emerald-100 hover:bg-emerald-700 active:scale-95 transition-all flex items-center gap-2"
@@ -726,22 +837,56 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
               </button>
             )}
 
-            <button
-              onClick={() => setShowNoBidModal(true)}
-              className="flex items-center gap-2 px-6 py-2.5 text-[10px] font-black text-white bg-red-600 rounded-xl uppercase tracking-widest hover:bg-red-700 active:scale-95 transition-all shadow-lg shadow-red-100"
-            >
-              No-Bid <Flag size={14} />
-            </button>
+            {userRole !== 'VIEWER' && (
+              <button
+                onClick={() => setShowNoBidModal(true)}
+                className="flex items-center gap-2 px-6 py-2.5 text-[10px] font-black text-white bg-red-600 rounded-xl uppercase tracking-widest hover:bg-red-700 active:scale-95 transition-all shadow-lg shadow-red-100"
+              >
+                No-Bid <Flag size={14} />
+              </button>
+            )}
           </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-8 space-y-10 scrollbar-hide pb-60 text-left">
-          <div className="flex items-center justify-between px-2">
-            <div className="flex items-center gap-3">
-              <div className={clsx("p-3 rounded-2xl shadow-sm text-white", isPreviewingFuture ? "bg-amber-500" : viewingIndex < currentOfficialIndex ? "bg-emerald-500" : "bg-[#D32F2F]")}>{STAGE_ICONS[viewingStage]}</div>
-              <div><h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">{viewingStage} Phase</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">{isPreviewingFuture ? "Preview Mode: Locked" : viewingIndex < currentOfficialIndex ? "Review Mode: Finished" : "Active Mode: Work in progress"}</p></div>
-            </div>
-          </div>
+          {/* Phase Header with Timing Badge */}
+          {(() => {
+            const phaseTargets = calculatePhaseTargets(bid.deadline, bid.receivedDate, bid.complexity || 'Medium');
+            const targetDays = phaseTargets[viewingStage] || 1;
+            const elapsedDays = getPhaseElapsedDays(bid.stageHistory || [], viewingStage);
+            const timingStatus = getTimingStatus(elapsedDays, targetDays);
+            const showT2Warning = bid.currentStage === BidStage.PRICING && remainingDays <= 2;
+
+            return (
+              <div className="flex items-center justify-between px-2">
+                <div className="flex items-center gap-3">
+                  <div className={clsx("p-3 rounded-2xl shadow-sm text-white", isPreviewingFuture ? "bg-amber-500" : viewingIndex < currentOfficialIndex ? "bg-emerald-500" : "bg-[#D32F2F]")}>{STAGE_ICONS[viewingStage]}</div>
+                  <div><h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">{viewingStage} Phase</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">{isPreviewingFuture ? "Preview Mode: Locked" : viewingIndex < currentOfficialIndex ? "Review Mode: Finished" : "Active Mode: Work in progress"}</p></div>
+                </div>
+
+                {/* Timing Badge */}
+                <div className="flex items-center gap-3">
+                  {showT2Warning && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-red-500 text-white rounded-xl animate-pulse">
+                      <AlertTriangle size={14} />
+                      <span className="text-[10px] font-black uppercase tracking-wider">T-{remainingDays} • Submit Soon!</span>
+                    </div>
+                  )}
+                  <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border-2", timingStatus.color)}>
+                    <Clock size={14} />
+                    <span className="text-sm font-black">{elapsedDays}d</span>
+                    <span className="text-[10px] font-bold opacity-60">/</span>
+                    <span className="text-sm font-black opacity-70">{targetDays}d</span>
+                    <span className="text-[9px] font-black uppercase tracking-wider ml-1">
+                      {timingStatus.status === 'ahead' && '✓ Ahead'}
+                      {timingStatus.status === 'on-track' && '• On Track'}
+                      {timingStatus.status === 'behind' && '⚠ Behind'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {viewingStage !== BidStage.FINAL_REVIEW && (
             <>
@@ -754,23 +899,53 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                         <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Bid Brief & Scope</h3>
                       </div>
                       <div className="flex items-center gap-2">
-                        {bid.preBidMeeting?.date && (
-                          <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500 text-white rounded-lg group relative cursor-help">
-                            <MapPin size={10} />
-                            <span className="text-[9px] font-black uppercase tracking-wider">
-                              Pre-Bid: {new Date(bid.preBidMeeting.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                            </span>
-                            {/* Tooltip for Pre-Bid Meeting */}
+                        {/* Pre-Bid Meeting Status Bar */}
+                        <div
+                          onClick={() => !isPreviewingFuture && userRole !== 'VIEWER' && refs.preBidDate.current?.click()}
+                          className={clsx(
+                            "flex items-center gap-1.5 px-3 py-1 rounded-lg group relative transition-all",
+                            bid.preBidMeeting?.date && !isNaN(new Date(bid.preBidMeeting.date).getTime())
+                              ? "bg-amber-500 text-white cursor-help"
+                              : clsx("bg-slate-100 text-slate-400 uppercase", userRole !== 'VIEWER' ? "hover:bg-slate-200 cursor-pointer" : "cursor-default")
+                          )}
+                        >
+                          <MapPin size={10} />
+                          <span className="text-[9px] font-black uppercase tracking-wider">
+                            {bid.preBidMeeting?.date && !isNaN(new Date(bid.preBidMeeting.date).getTime())
+                              ? `Pre-Bid: ${new Date(bid.preBidMeeting.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+                              : "Pre-Bid Meeting: No"}
+                          </span>
+
+                          <input
+                            type="date"
+                            ref={refs.preBidDate}
+                            className="hidden"
+                            onChange={(e) => {
+                              const newDate = e.target.value;
+                              if (newDate) {
+                                onUpdate({
+                                  ...bid,
+                                  preBidMeeting: {
+                                    ...(bid.preBidMeeting || { time: '', location: '', isMandatory: false }),
+                                    date: newDate
+                                  }
+                                });
+                              }
+                            }}
+                          />
+
+                          {/* Tooltip for Pre-Bid Meeting */}
+                          {bid.preBidMeeting && (
                             <div className="opacity-0 group-hover:opacity-100 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-slate-900 text-white text-[10px] rounded-xl shadow-2xl transition-opacity pointer-events-none z-50 border border-white/10 backdrop-blur-md">
                               <div className="font-black uppercase tracking-widest text-amber-400 mb-1">Pre-Bid Meeting</div>
                               <div className="space-y-1">
-                                <p className="flex justify-between"><span>Time:</span> <span className="font-bold">{bid.preBidMeeting.time}</span></p>
-                                <p className="flex justify-between"><span>Location:</span> <span className="font-bold truncate max-w-[100px]">{bid.preBidMeeting.location}</span></p>
+                                <p className="flex justify-between"><span>Time:</span> <span className="font-bold">{bid.preBidMeeting.time || 'TBD'}</span></p>
+                                <p className="flex justify-between"><span>Location:</span> <span className="font-bold truncate max-w-[100px]">{bid.preBidMeeting.location || 'TBD'}</span></p>
                                 {bid.preBidMeeting.isMandatory && <p className="text-red-400 font-black uppercase text-[8px]">Mandatory Attendance</p>}
                               </div>
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
                         {(bid.requiredSolutions || []).map(s => (
                           <span key={s} className="px-3 py-1 bg-red-50 text-red-500 rounded-lg text-[9px] font-black uppercase tracking-wider">{s}</span>
                         ))}
@@ -817,6 +992,152 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                       </div>
                     </div>
                   )}
+
+                  {/* Phase Target Timeline */}
+                  {bid.deadline && (
+                    <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 shadow-sm mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-50">
+                        <div className="flex items-center gap-3">
+                          <Clock className="text-[#D32F2F]" size={20} />
+                          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Phase Target Plan</h3>
+                          <span className={clsx(
+                            "px-2 py-0.5 rounded text-[9px] font-black uppercase",
+                            bid.complexity === 'High' ? 'bg-red-100 text-red-600' :
+                              bid.complexity === 'Medium' ? 'bg-amber-100 text-amber-600' :
+                                'bg-green-100 text-green-600'
+                          )}>{bid.complexity || 'Medium'}</span>
+                        </div>
+                        {bid.publishDate && (
+                          <div className="flex items-center">
+                            <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider mr-1">INTAKE LAG:</span>
+                            <span className="text-[10px] font-black text-red-500 uppercase tracking-wider">
+                              {Math.max(0, Math.ceil((new Date(bid.receivedDate).getTime() - new Date(bid.publishDate).getTime()) / (1000 * 60 * 60 * 24)))} DAYS
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      {(() => {
+                        const targets = calculatePhaseTargets(bid.deadline, bid.receivedDate, bid.complexity || 'Medium');
+                        const totalPhaseDays = Object.values(targets).reduce((a, b) => a + b, 0);
+                        const startDate = new Date(bid.receivedDate);
+                        const deadlineDate = new Date(bid.deadline);
+                        const totalAvailableDays = Math.ceil((deadlineDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+                        const gapDays = Math.max(0, totalAvailableDays - totalPhaseDays);
+
+                        const phases = [
+                          { name: 'Intake', key: 'Intake', color: '#64748b', textColor: '#475569' },
+                          { name: 'Qualification', key: 'Qualification', color: '#f59e0b', textColor: '#d97706' },
+                          { name: 'Solutioning', key: 'Solutioning', color: '#0ea5e9', textColor: '#0284c7' },
+                          { name: 'Pricing', key: 'Pricing', color: '#8b5cf6', textColor: '#7c3aed' },
+                          { name: 'Compliance', key: 'Compliance', color: '#10b981', textColor: '#059669' },
+                          { name: 'Final Review', key: 'Final Review', color: '#f97316', textColor: '#ea580c' }
+                        ];
+
+                        // Calculate cumulative dates for each phase
+                        let cumulativeDays = 0;
+                        const phaseData = phases.map(phase => {
+                          const days = targets[phase.key] || 0.5;
+                          const phaseStartDate = new Date(startDate);
+                          phaseStartDate.setDate(phaseStartDate.getDate() + Math.floor(cumulativeDays));
+                          const phaseEndDate = new Date(phaseStartDate);
+                          phaseEndDate.setDate(phaseEndDate.getDate() + Math.ceil(days));
+                          cumulativeDays += days;
+                          return { ...phase, days, startDate: phaseStartDate, endDate: phaseEndDate, width: (days / totalAvailableDays) * 100 };
+                        });
+
+                        const gapWidth = (gapDays / totalAvailableDays) * 100;
+
+                        return (
+                          <div>
+                            {/* Graphical Bar with Hover Cards */}
+                            <div className="flex h-14 shadow-sm border border-slate-100 rounded-2xl">
+                              {phaseData.map((phase, idx) => (
+                                <div
+                                  key={phase.key}
+                                  className={clsx(
+                                    "flex items-center justify-center text-white font-bold text-sm transition-all hover:brightness-110 cursor-pointer relative group",
+                                    idx === 0 && "rounded-l-2xl",
+                                    idx === phaseData.length - 1 && !gapWidth && "rounded-r-2xl"
+                                  )}
+                                  style={{ width: `${phase.width}%`, minWidth: '36px', backgroundColor: phase.color }}
+                                >
+                                  <span className="drop-shadow-md text-xs">{phase.days}d</span>
+
+                                  {/* Hover Card */}
+                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100 transition-all duration-200 pointer-events-none z-50">
+                                    <div
+                                      className="px-4 py-3 rounded-xl shadow-2xl whitespace-nowrap border-2"
+                                      style={{ borderColor: phase.color, backgroundColor: phase.color }}
+                                    >
+                                      <div className="bg-white rounded-lg p-3">
+                                        <p className="text-[11px] font-black uppercase tracking-wider mb-1" style={{ color: phase.textColor }}>{phase.name}</p>
+                                        <p className="text-xl font-black text-slate-800">{phase.days} days</p>
+                                        <p className="text-[10px] font-medium text-slate-400 mt-1">
+                                          Target: <span className="font-bold text-slate-600">{phase.endDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div
+                                      className="absolute top-full left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 -mt-1.5"
+                                      style={{ backgroundColor: phase.color }}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+
+                              {/* Gap (buffer time) */}
+                              {gapWidth > 0 && (
+                                <div
+                                  className="bg-slate-100 flex items-center justify-center"
+                                  style={{ width: `${gapWidth}%` }}
+                                >
+                                  {gapWidth > 5 && <span className="text-[9px] font-medium text-slate-400">buffer</span>}
+                                </div>
+                              )}
+
+                              {/* Deadline Marker */}
+                              <div className="bg-red-600 flex items-center justify-center text-white min-w-[80px] relative group rounded-r-2xl">
+                                <div className="text-center">
+                                  <p className="text-[8px] font-bold uppercase tracking-wider opacity-80">SUBMIT</p>
+                                  <p className="text-[10px] font-black">{deadlineDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</p>
+                                </div>
+
+                                {/* Deadline Hover Card */}
+                                <div className="absolute bottom-full right-0 mb-4 opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100 transition-all duration-200 pointer-events-none z-50">
+                                  <div className="bg-red-600 px-4 py-3 rounded-xl shadow-2xl border-2 border-red-700">
+                                    <div className="bg-white rounded-lg p-3">
+                                      <p className="text-[10px] font-black uppercase tracking-wider text-red-600 mb-1">Submission Deadline</p>
+                                      <p className="text-lg font-black text-slate-800">{deadlineDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                    </div>
+                                  </div>
+                                  <div className="absolute top-full right-4 w-3 h-3 rotate-45 -mt-1.5 bg-red-600" />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Summary Footer */}
+                            <div className="flex items-center justify-between pt-4 mt-4">
+                              <div className="flex items-center gap-4">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Work: <span className="text-slate-800">{totalPhaseDays} days</span></span>
+                                {gapDays > 0 && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Buffer: <span className="text-emerald-600">{gapDays} days</span></span>}
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2">
+                                  {phases.map(p => (
+                                    <div key={p.key} className="flex items-center gap-1">
+                                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
+                                      <span className="text-[8px] font-medium text-slate-400">{p.name.split(' ')[0]}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )
+                  }
                 </>
               )}
 
@@ -825,8 +1146,8 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                   "grid grid-cols-1 gap-8 animate-in fade-in slide-in-from-bottom-2 duration-500",
                   viewingStage === BidStage.INTAKE ? "xl:grid-cols-2" : "xl:grid-cols-3"
                 )}>
-                  <CompactChecklist title="General Compliance" items={bid.complianceChecklist || []} icon={<ShieldCheck className="text-blue-500" size={16} />} onToggle={(i) => !isPreviewingFuture && toggleItemStatus('compliance', i)} readOnly={isPreviewingFuture} />
-                  <CompactChecklist title="Technical Compliance" items={bid.technicalQualificationChecklist || []} icon={<CheckSquare className="text-amber-500" size={16} />} onToggle={(i) => !isPreviewingFuture && toggleItemStatus('technical', i)} readOnly={isPreviewingFuture} />
+                  <CompactChecklist title="General Compliance" items={bid.complianceChecklist || []} icon={<ShieldCheck className="text-blue-500" size={16} />} onToggle={(i) => !isPreviewingFuture && userRole !== 'VIEWER' && toggleItemStatus('compliance', i)} readOnly={isPreviewingFuture || userRole === 'VIEWER'} />
+                  <CompactChecklist title="Technical Compliance" items={bid.technicalQualificationChecklist || []} icon={<CheckSquare className="text-amber-500" size={16} />} onToggle={(i) => !isPreviewingFuture && userRole !== 'VIEWER' && toggleItemStatus('technical', i)} readOnly={isPreviewingFuture || userRole === 'VIEWER'} />
 
                   {/* Hide Integrity Index card in Intake Stage */}
                   {viewingStage !== BidStage.INTAKE && (
@@ -848,14 +1169,17 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                 <StageSection title="Bid Security Verification" icon={<Banknote className="text-emerald-500" />}>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                     <div
-                      onClick={() => refs.bidSecurity.current?.click()}
-                      className="group bg-[#1E3A5F] rounded-[2.5rem] border-2 border-dashed border-white/20 p-10 text-center hover:border-[#FFC107] hover:bg-white/5 shadow-xl transition-all cursor-pointer relative overflow-hidden flex flex-col justify-center min-h-[460px]"
+                      onClick={() => !isPreviewingFuture && userRole !== 'VIEWER' && refs.bidSecurity.current?.click()}
+                      className={clsx(
+                        "group bg-[#1E3A5F] rounded-[2.5rem] border-2 border-dashed border-white/20 p-10 text-center shadow-xl transition-all relative overflow-hidden flex flex-col justify-center min-h-[460px]",
+                        userRole !== 'VIEWER' ? "hover:border-[#FFC107] hover:bg-white/5 cursor-pointer" : "cursor-default"
+                      )}
                     >
                       <div className="absolute top-0 right-0 p-8 opacity-10"><Landmark size={80} className="text-white" /></div>
                       <div className="w-20 h-20 bg-white/10 rounded-3xl flex items-center justify-center mx-auto mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all">
-                        {isAnalyzingBidSecurity ? <Loader2 className="animate-spin text-[#FFC107]" size={36} /> : <FileUp size={36} className="text-[#FFC107]" />}
+                        {isAnalyzingBidSecurity ? <Loader2 className="animate-spin text-[#FFC107]" size={36} /> : <FileUp size={36} className={clsx(userRole !== 'VIEWER' ? "text-[#FFC107]" : "text-slate-500")} />}
                       </div>
-                      <h4 className="text-xl font-black text-white uppercase mb-2 tracking-tight group-hover:text-[#FFC107]">Upload Instrument</h4>
+                      <h4 className="text-xl font-black text-white uppercase mb-2 tracking-tight group-hover:text-[#FFC107]">{userRole !== 'VIEWER' ? "Upload Instrument" : "Instrument View"}</h4>
                       <p className="text-[10px] text-white/40 font-black uppercase tracking-widest leading-relaxed">PDF, PNG, JPG, JPEG</p>
                       <div className="mt-8 pt-8 border-t border-white/10 text-left">
                         <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-2">RFP Requirement</p>
@@ -924,9 +1248,9 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
 
                 <StageSection title="Regulatory & Compliance Assets" icon={<ShieldCheck className="text-blue-500" />}>
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <UploadPortal onClick={() => refs.compliance.current?.click()} title="Compliance Docs" desc="Legal & Tax Credentials" loading={isAnalyzing} status={scanningStatus} icon={<ShieldCheck size={24} className="text-blue-500" />} />
-                    <UploadPortal onClick={() => refs.annexure.current?.click()} title="Annexures" desc="RFP Specific Appendices" loading={isAnalyzing} status={scanningStatus} icon={<FileBox size={24} className="text-amber-500" />} />
-                    <UploadPortal onClick={() => refs.supporting.current?.click()} title="Supporting Docs" desc="Any other bid collateral" loading={isAnalyzing} status={scanningStatus} icon={<Layers size={24} className="text-indigo-500" />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.compliance.current?.click()} title="Compliance Docs" desc="Legal & Tax Credentials" loading={isAnalyzing} status={scanningStatus} icon={<ShieldCheck size={24} className={clsx(userRole !== 'VIEWER' ? "text-blue-500" : "text-slate-400")} />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.annexure.current?.click()} title="Annexures" desc="RFP Specific Appendices" loading={isAnalyzing} status={scanningStatus} icon={<FileBox size={24} className={clsx(userRole !== 'VIEWER' ? "text-amber-500" : "text-slate-400")} />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.supporting.current?.click()} title="Supporting Docs" desc="Any other bid collateral" loading={isAnalyzing} status={scanningStatus} icon={<Layers size={24} className={clsx(userRole !== 'VIEWER' ? "text-indigo-500" : "text-slate-400")} />} />
                   </div>
                 </StageSection>
               </div>
@@ -980,7 +1304,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                   <div className="space-y-6">
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Exposure Report</p>
-                      <button onClick={runStrategicRiskAssessment} disabled={isEvaluatingStrategicRisk} className="px-5 py-2.5 bg-[#1E3A5F] text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-900 flex items-center gap-2 transition-all disabled:opacity-50">
+                      <button onClick={runStrategicRiskAssessment} disabled={isEvaluatingStrategicRisk || userRole === 'VIEWER'} className="px-5 py-2.5 bg-[#1E3A5F] text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-900 flex items-center gap-2 transition-all disabled:opacity-50">
                         {isEvaluatingStrategicRisk ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />} Refresh Analysis
                       </button>
                     </div>
@@ -1024,13 +1348,13 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
               <StageSection title="Solutioning & Architecture" icon={<Zap className="text-amber-500" />}>
                 <div className="space-y-10">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <UploadPortal onClick={() => refs.technical.current?.click()} title="Technical Proposal" desc="Upload narrative & diagrams" loading={isAnalyzing} status={scanningStatus} icon={<FileText size={24} className="text-blue-500" />} />
-                    <UploadPortal onClick={() => refs.vendor.current?.click()} title="Vendor Quotes" desc="Upload OEM prices" loading={isAnalyzing} status={scanningStatus} icon={<Briefcase size={24} className="text-[#D32F2F]" />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.technical.current?.click()} title="Technical Proposal" desc="Upload narrative & diagrams" loading={isAnalyzing} status={scanningStatus} icon={<FileText size={24} className={clsx(userRole !== 'VIEWER' ? "text-blue-500" : "text-slate-400")} />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.vendor.current?.click()} title="Vendor Quotes" desc="Upload OEM prices" loading={isAnalyzing} status={scanningStatus} icon={<Briefcase size={24} className={clsx(userRole !== 'VIEWER' ? "text-[#D32F2F]" : "text-slate-400")} />} />
                   </div>
                   <div className="bg-slate-900 rounded-[3rem] p-10 text-white relative overflow-hidden shadow-2xl">
                     <div className="flex items-center justify-between mb-8">
                       <h4 className="text-lg font-black uppercase tracking-tight flex items-center gap-2"><Target className="text-[#FFC107]" /> AI Alignment Check</h4>
-                      <button onClick={() => runSolutionAnalysis()} disabled={isAnalyzingSolution || bid.technicalDocuments.length === 0} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-[10px] font-black uppercase border border-white/10 transition-all disabled:opacity-50">
+                      <button onClick={() => runSolutionAnalysis()} disabled={isAnalyzingSolution || bid.technicalDocuments.length === 0 || userRole === 'VIEWER'} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-[10px] font-black uppercase border border-white/10 transition-all disabled:opacity-50">
                         {isAnalyzingSolution ? <Loader2 size={14} className="animate-spin" /> : "Re-Run Check"}
                       </button>
                     </div>
@@ -1050,7 +1374,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                         <SummaryItem label="Total (Excl. Tax)" value={`PKR ${(bid.tcvExclTax || 0).toLocaleString()}`} />
                         <SummaryItem label="Total (Incl. Tax)" value={bid.tcvInclTax ? `PKR ${bid.tcvInclTax.toLocaleString()}` : '—'} color="text-emerald-600" />
-                        <SummaryItem label="Duration" value={bid.contractDuration || "N/A"} />
+                        <SummaryItem label="Duration (Days)" value={bid.contractDuration || "N/A"} />
                         <SummaryItem label="Payment (Days)" value={bid.customerPaymentTerms || "N/A"} />
                       </div>
                       <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 text-left">
@@ -1071,7 +1395,11 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                                       type="text"
                                       value={f.unitPrice ? f.unitPrice.toLocaleString() : ''}
                                       onChange={(e) => handleUpdatePrice(i, e.target.value)}
-                                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-black text-blue-600 focus:ring-1 focus:ring-blue-500 outline-none text-right"
+                                      disabled={userRole === 'VIEWER'}
+                                      className={clsx(
+                                        "w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-black focus:ring-1 outline-none text-right",
+                                        userRole === 'VIEWER' ? "text-slate-500 cursor-default" : "text-blue-600 focus:ring-blue-500"
+                                      )}
                                       placeholder="0"
                                     />
                                     <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[8px] text-slate-300 font-black">PKR</span>
@@ -1093,7 +1421,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                     <div className="bg-[#1E3A5F] rounded-[2.5rem] p-8 text-white text-left">
                       <h4 className="text-xs font-black uppercase tracking-widest mb-6 flex items-center gap-2"><Sparkles size={16} className="text-[#FFC107]" /> Pricing Tool</h4>
                       <p className="text-[10px] text-slate-400 mb-8 leading-relaxed font-medium">AI will extract commercial schedules and auto-calculate TCV.</p>
-                      <button onClick={() => refs.pricing.current?.click()} className="w-full py-4 bg-[#D32F2F] text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-red-700 transition-all flex items-center justify-center gap-3">{isAnalyzing ? <Loader2 className="animate-spin" size={16} /> : <FileUp size={16} />} Upload Price Sheet</button>
+                      <button onClick={() => userRole !== 'VIEWER' && refs.pricing.current?.click()} className={clsx("w-full py-4 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg transition-all flex items-center justify-center gap-3", userRole === 'VIEWER' ? "bg-slate-700 cursor-default" : "bg-[#D32F2F] hover:bg-red-700")}>{isAnalyzing ? <Loader2 className="animate-spin" size={16} /> : <FileUp size={16} />} {userRole === 'VIEWER' ? "Price Sheet View" : "Upload Price Sheet"}</button>
                     </div>
                   </div>
                 </StageSection>
@@ -1103,7 +1431,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                     <div className="max-w-md">
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Assigned Authority</label>
                       <div className="relative group">
-                        <select value={bid.approvingAuthorityRole || ''} onChange={(e) => onUpdate({ ...bid, approvingAuthorityRole: e.target.value as ApprovingAuthorityRole, pricingApprovalStatus: 'Pending' })} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 text-sm font-black text-slate-900 focus:outline-none appearance-none cursor-pointer transition-all shadow-sm">
+                        <select value={bid.approvingAuthorityRole || ''} onChange={(e) => userRole !== 'VIEWER' && onUpdate({ ...bid, approvingAuthorityRole: e.target.value as ApprovingAuthorityRole, pricingApprovalStatus: 'Pending' })} disabled={userRole === 'VIEWER'} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 text-sm font-black text-slate-900 focus:outline-none appearance-none cursor-pointer transition-all shadow-sm disabled:cursor-default disabled:opacity-60">
                           <option value="" disabled>Select Authority...</option>
                           <option value="Manager Finance">Manager Finance</option>
                           <option value="CFO">CFO</option>
@@ -1116,7 +1444,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                     {bid.approvingAuthorityRole && (
                       <div className="bg-slate-50 p-10 rounded-[3rem] border border-slate-200 flex flex-col md:flex-row items-center justify-between gap-8">
                         <div className="flex items-center gap-6"><div className="p-5 bg-white rounded-[1.5rem] shadow-sm text-blue-500 border border-slate-100"><UserCheck size={32} /></div><div><h4 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">{bid.approvingAuthorityRole}</h4><p className="text-xs text-slate-500 font-medium">Mandatory bid sign-off stakeholder.</p></div></div>
-                        <div className="flex gap-4"><button onClick={() => onUpdate({ ...bid, pricingApprovalStatus: 'Submitted', approvalRequestedDate: new Date().toISOString() })} disabled={bid.pricingApprovalStatus !== 'Pending'} className="px-8 py-4 bg-[#1E3A5F] text-white text-xs font-black uppercase rounded-2xl shadow-xl hover:bg-slate-900 transition-all disabled:opacity-50">Submit Request</button><button onClick={() => onUpdate({ ...bid, pricingApprovalStatus: 'Approved', managementApprovalDate: new Date().toISOString() })} disabled={bid.pricingApprovalStatus !== 'Submitted'} className="px-8 py-4 bg-emerald-600 text-white text-xs font-black uppercase rounded-2xl shadow-xl hover:bg-emerald-700 transition-all disabled:opacity-50">Confirm Approval</button></div>
+                        <div className="flex gap-4"><button onClick={() => onUpdate({ ...bid, pricingApprovalStatus: 'Submitted', approvalRequestedDate: new Date().toISOString() })} disabled={bid.pricingApprovalStatus !== 'Pending' || userRole === 'VIEWER'} className="px-8 py-4 bg-[#1E3A5F] text-white text-xs font-black uppercase rounded-2xl shadow-xl hover:bg-slate-900 transition-all disabled:opacity-50">Submit Request</button><button onClick={() => onUpdate({ ...bid, pricingApprovalStatus: 'Approved', managementApprovalDate: new Date().toISOString() })} disabled={bid.pricingApprovalStatus !== 'Submitted' || userRole === 'VIEWER'} className="px-8 py-4 bg-emerald-600 text-white text-xs font-black uppercase rounded-2xl shadow-xl hover:bg-emerald-700 transition-all disabled:opacity-50">Confirm Approval</button></div>
                       </div>
                     )}
                   </div>
@@ -1132,11 +1460,22 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                   ) : bid.status === BidStatus.WON || bid.status === BidStatus.LOST || bid.status === BidStatus.NO_BID ? (
                     <div className="bg-white rounded-[4rem] p-16 shadow-2xl border border-slate-200 border-t-8 border-t-slate-800"><div className="w-24 h-24 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-8">{bid.status === BidStatus.WON ? <Trophy size={56} className="text-emerald-500" /> : <ThumbsDown size={56} className="text-red-500" />}</div><h3 className="text-3xl font-black text-slate-900 mb-2 uppercase tracking-tight">Bid Closed</h3><p className="text-slate-500 font-black tracking-widest uppercase text-[11px] mt-4">Status: {bid.status}</p></div>
                   ) : (
-                    <div className="bg-white rounded-[4rem] p-16 shadow-2xl border border-slate-200"><div className="w-24 h-24 bg-red-50 text-[#D32F2F] rounded-full flex items-center justify-center mx-auto mb-8"><Send size={48} /></div><h3 className="text-3xl font-black text-slate-900 mb-4 uppercase tracking-tight">Governance Sign-Off</h3><button onClick={() => onUpdate({ ...bid, status: BidStatus.SUBMITTED, submissionDate: new Date().toISOString() })} className="w-full bg-[#D32F2F] text-white py-6 rounded-[2rem] font-black shadow-2xl hover:bg-[#B71C1C] transition-all text-xs uppercase tracking-widest">Confirm & Submit Bid</button></div>
+                    <div className="bg-white rounded-[4rem] p-16 shadow-2xl border border-slate-200">
+                      <div className="w-24 h-24 bg-red-50 text-[#D32F2F] rounded-full flex items-center justify-center mx-auto mb-8"><Send size={48} /></div>
+                      <h3 className="text-3xl font-black text-slate-900 mb-4 uppercase tracking-tight">{userRole === 'VIEWER' ? "Governance Review" : "Governance Sign-Off"}</h3>
+                      {userRole !== 'VIEWER' ? (
+                        <button onClick={() => onUpdate({ ...bid, status: BidStatus.SUBMITTED, submissionDate: new Date().toISOString() })} className="w-full bg-[#D32F2F] text-white py-6 rounded-[2rem] font-black shadow-2xl hover:bg-[#B71C1C] transition-all text-xs uppercase tracking-widest">Confirm & Submit Bid</button>
+                      ) : (
+                        <p className="text-sm font-bold text-slate-400 uppercase tracking-widest italic">Awaiting Submission by Bids Team</p>
+                      )}
+                    </div>
                   )}
                 </div>
                 <StageSection title="Final Readiness Scan" icon={<ShieldAlert className="text-red-500" />}>
-                  <div className="space-y-6 text-left"><button onClick={runFinalRiskAssessment} disabled={isEvaluatingRisk} className="px-10 py-4 bg-[#D32F2F] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:scale-105 transition-all flex items-center gap-2 mx-auto disabled:opacity-50">{isEvaluatingRisk ? <Loader2 className="animate-spin" size={18} /> : <Zap size={18} />} Scan Readiness</button>{bid.finalRiskAssessment && (<div className="grid grid-cols-1 md:grid-cols-2 gap-8"><div className="bg-red-50 p-8 rounded-[2.5rem] border border-red-100"><h4 className="text-sm font-black text-red-600 uppercase tracking-widest mb-6">Open Risks</h4><ul className="space-y-3">{bid.finalRiskAssessment.risks.map((r, i) => <li key={i} className="text-xs font-bold text-red-800 flex gap-2"><AlertCircle size={12} className="shrink-0 mt-0.5" /> {r}</li>)}</ul></div><div className="bg-emerald-50 p-8 rounded-[2.5rem] border border-emerald-100"><h4 className="text-sm font-black text-emerald-600 uppercase tracking-widest mb-6">Mitigation Fixes</h4><ul className="space-y-3">{bid.finalRiskAssessment.mitigations.map((m, i) => <li key={i} className="text-xs font-bold text-emerald-800 flex gap-2"><CheckCircle2 size={12} className="shrink-0 mt-0.5" /> {m}</li>)}</ul></div></div>)}</div>
+                  <div className="space-y-6 text-left">
+                    <button onClick={runFinalRiskAssessment} disabled={isEvaluatingRisk || userRole === 'VIEWER'} className="px-10 py-4 bg-[#D32F2F] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:scale-105 transition-all flex items-center gap-2 mx-auto disabled:opacity-50">
+                      {isEvaluatingRisk ? <Loader2 className="animate-spin" size={18} /> : <Zap size={18} />} Scan Readiness
+                    </button>{bid.finalRiskAssessment && (<div className="grid grid-cols-1 md:grid-cols-2 gap-8"><div className="bg-red-50 p-8 rounded-[2.5rem] border border-red-100"><h4 className="text-sm font-black text-red-600 uppercase tracking-widest mb-6">Open Risks</h4><ul className="space-y-3">{bid.finalRiskAssessment.risks.map((r, i) => <li key={i} className="text-xs font-bold text-red-800 flex gap-2"><AlertCircle size={12} className="shrink-0 mt-0.5" /> {r}</li>)}</ul></div><div className="bg-emerald-50 p-8 rounded-[2.5rem] border border-emerald-100"><h4 className="text-sm font-black text-emerald-600 uppercase tracking-widest mb-6">Mitigation Fixes</h4><ul className="space-y-3">{bid.finalRiskAssessment.mitigations.map((m, i) => <li key={i} className="text-xs font-bold text-emerald-800 flex gap-2"><CheckCircle2 size={12} className="shrink-0 mt-0.5" /> {m}</li>)}</ul></div></div>)}</div>
                 </StageSection>
               </div>
             )}
@@ -1166,7 +1505,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose }) =
                     <span className="text-[9px] font-black text-emerald-500 uppercase">{doc.aiScore ? `${doc.aiScore}% Match` : 'Verified'}</span>
                     <div className="flex gap-2">
                       <button onClick={() => handleDownload(doc)} className="p-2 text-slate-300 hover:text-blue-600 rounded-lg transition-all"><Download size={14} /></button>
-                      <button onClick={() => setDeletingAssetId(doc.id)} className="p-2 text-slate-300 hover:text-red-600 rounded-lg transition-all"><Trash2 size={14} /></button>
+                      {userRole !== 'VIEWER' && <button onClick={() => setDeletingAssetId(doc.id)} className="p-2 text-slate-300 hover:text-red-600 rounded-lg transition-all"><Trash2 size={14} /></button>}
                     </div>
                   </div>
                 </div>

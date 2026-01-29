@@ -46,6 +46,7 @@ export interface ProposalSection {
   status: 'pending' | 'in-progress' | 'complete';
   wordCount: number;
   description?: string;
+  type?: 'narrative' | 'form' | 'table' | 'annexure';
 }
 
 export interface FinancialFormat {
@@ -119,15 +120,24 @@ export interface BidRisk {
   severity: RiskLevel;
 }
 
+export type AuditChangeType = 'stage_change' | 'document_upload' | 'approval' | 'edit' | 'status_change' | 'user_action';
+
 export interface ActivityLog {
   id: string;
   userName: string;
   userRole: string;
+  userRoleName?: string;
   action: string;
   target: string;
   subText: string;
   timestamp: string;
   modality: 'sparkles' | 'zap' | 'check' | 'alert';
+  // Bid-specific tracking fields
+  bidId?: string;
+  projectName?: string;
+  changeType?: AuditChangeType;
+  previousValue?: string;
+  newValue?: string;
 }
 
 export interface StrategicRiskReport {
@@ -207,10 +217,166 @@ export interface BidRecord {
     commercialWeight: number;
     legalWeight: number;
   };
+  phaseTargets?: Record<string, number>; // Calculated target days per phase
 }
+
+// User Role Types
+export type UserRole = 'SUPER_ADMIN' | 'BID_TEAM' | 'VIEWER' | string;
+
+export type AvatarIcon = 'initials' | 'briefcase' | 'user' | 'shield' | 'building' | 'star' | 'rocket' | 'crown';
 
 export interface User {
   id: string;
+  email: string;
   name: string;
-  role: 'BidsTeam' | 'Sales' | 'Management' | 'Technical';
+  role: UserRole;
+  roleName?: string;
+  isActive: boolean;
+  lastLogin?: string;
+  createdAt?: string;
+  avatar?: string; // Base64 image data or AvatarIcon name
+  avatarType?: 'icon' | 'image'; // Whether avatar is a preset icon or custom image
+  permissions?: SectionPermissions;
 }
+
+// Role display names for UI
+export const USER_ROLE_LABELS: Record<string, string> = {
+  SUPER_ADMIN: 'Super Admin',
+  BID_TEAM: 'Bids Team',
+  VIEWER: 'Viewer',
+};
+
+// Permission definitions
+export type Permission =
+  | 'view_dashboard'
+  | 'view_bids'
+  | 'create_bids'
+  | 'edit_bids'
+  | 'delete_bids'
+  | 'manage_approvals'
+  | 'view_vault'
+  | 'edit_vault'
+  | 'use_proposal_studio'
+  | 'view_reports'
+  | 'view_settings'
+  | 'manage_users'
+  | 'view_audit_logs';
+
+// Role-Permission mapping
+export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+  SUPER_ADMIN: [
+    'view_dashboard', 'view_bids', 'create_bids', 'edit_bids', 'delete_bids',
+    'manage_approvals', 'view_vault', 'edit_vault', 'use_proposal_studio',
+    'view_reports', 'view_settings', 'manage_users', 'view_audit_logs'
+  ],
+  BID_TEAM: [
+    'view_dashboard', 'view_bids', 'create_bids', 'edit_bids',
+    'manage_approvals', 'view_vault', 'edit_vault', 'use_proposal_studio',
+    'view_reports', 'view_audit_logs'
+  ],
+  VIEWER: [
+    'view_dashboard', 'view_bids', 'view_vault', 'view_reports'
+  ],
+};
+
+export const hasPermission = (role: UserRole, permission: Permission): boolean => {
+  return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
+};
+
+// ============================================
+// GRANULAR ROLE-BASED ACCESS CONTROL (RBAC)
+// ============================================
+
+// Section identifiers for permission control
+export type AppSection =
+  | 'bid-intake'
+  | 'bid-stages'
+  | 'studio'
+  | 'vault'
+  | 'calculator'
+  | 'approvals'
+  | 'reports'
+  | 'risk-watch'
+  | 'settings';
+
+// All available sections (for iteration)
+export const APP_SECTIONS: { id: AppSection; label: string }[] = [
+  { id: 'bid-intake', label: 'Bid Intake' },
+  { id: 'bid-stages', label: 'Bid Stages / Lifecycle' },
+  { id: 'studio', label: 'Proposal Studio' },
+  { id: 'vault', label: 'Corporate Vault' },
+  { id: 'calculator', label: 'Margin Calculator' },
+  { id: 'approvals', label: 'Approvals' },
+  { id: 'reports', label: 'Reports' },
+  { id: 'risk-watch', label: 'Risk Watch' },
+  { id: 'settings', label: 'Settings' },
+];
+
+// Permission levels per section
+export type PermissionLevel = 'none' | 'view' | 'edit';
+
+// Section permission mapping
+export type SectionPermissions = Record<AppSection, PermissionLevel>;
+
+// Custom Role definition
+export interface CustomRole {
+  id: string;
+  name: string;
+  description: string;
+  permissions: SectionPermissions;
+  isBuiltIn: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Default permissions for built-in roles
+export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
+  SUPER_ADMIN: {
+    'bid-intake': 'edit',
+    'bid-stages': 'edit',
+    'studio': 'edit',
+    'vault': 'edit',
+    'calculator': 'edit',
+    'approvals': 'edit',
+    'reports': 'edit',
+    'risk-watch': 'edit',
+    'settings': 'edit',
+  },
+  BID_TEAM: {
+    'bid-intake': 'edit',
+    'bid-stages': 'edit',
+    'studio': 'edit',
+    'vault': 'edit',
+    'calculator': 'edit',
+    'approvals': 'edit',
+    'reports': 'view',
+    'risk-watch': 'view',
+    'settings': 'none',
+  },
+  VIEWER: {
+    'bid-intake': 'none',
+    'bid-stages': 'view',
+    'studio': 'none',
+    'vault': 'view',
+    'calculator': 'none',
+    'approvals': 'view',
+    'reports': 'view',
+    'risk-watch': 'view',
+    'settings': 'none',
+  },
+};
+
+// Helper: Check if user has at least view access to a section
+export const canViewSection = (permissions: SectionPermissions, section: AppSection): boolean => {
+  return permissions[section] === 'view' || permissions[section] === 'edit';
+};
+
+// Helper: Check if user has edit access to a section
+export const canEditSection = (permissions: SectionPermissions, section: AppSection): boolean => {
+  return permissions[section] === 'edit';
+};
+
+// Helper: Get permissions for a built-in role
+export const getBuiltInRolePermissions = (role: UserRole): SectionPermissions => {
+  return DEFAULT_ROLE_PERMISSIONS[role] || DEFAULT_ROLE_PERMISSIONS.VIEWER;
+};

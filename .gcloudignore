@@ -1,0 +1,9 @@
+.git
+.gitignore
+node_modules
+dist
+.env
+google-cloud-sdk
+*.log
+.DS_Store
+google-cloud-cli-darwin-arm.tar.gz

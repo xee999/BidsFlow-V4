@@ -60,6 +60,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
   const [filterSolution, setFilterSolution] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [quickHorizon, setQuickHorizon] = useState<'All' | 'This Week' | 'This Month'>('All');
+  const [dateType, setDateType] = useState<'received' | 'deadline' | 'published'>('received');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
 
   // No-Bid Intelligence State
@@ -152,32 +153,60 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
       const matchesSearch = b.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         b.customerName.toLowerCase().includes(searchQuery.toLowerCase());
 
-      // Date Filters
+      // Date Filtering Logic
+      const parseLocalDate = (dateStr: string) => {
+        if (!dateStr) return null;
+        if (dateStr.includes('T')) return new Date(dateStr); // Handle ISO strings
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
+      };
+
       let matchesRange = true;
+      const targetDateStr = dateType === 'deadline' ? b.deadline :
+        dateType === 'published' ? (b.publishDate || '') :
+          b.receivedDate;
+      const bidDate = parseLocalDate(targetDateStr);
+
       if (dateRange.start || dateRange.end) {
-        const bidDate = new Date(b.deadline);
-        if (dateRange.start) matchesRange = matchesRange && bidDate >= new Date(dateRange.start);
-        if (dateRange.end) matchesRange = matchesRange && bidDate <= new Date(dateRange.end);
+        if (!bidDate) {
+          matchesRange = false;
+        } else {
+          if (dateRange.start) {
+            const s = parseLocalDate(dateRange.start);
+            if (s) matchesRange = matchesRange && bidDate >= s;
+          }
+          if (dateRange.end) {
+            const e = parseLocalDate(dateRange.end);
+            if (e) {
+              e.setHours(23, 59, 59, 999);
+              matchesRange = matchesRange && bidDate <= e;
+            }
+          }
+        }
       }
 
       // Quick Horizon
       if (quickHorizon !== 'All') {
         const now = new Date();
-        const bidDate = new Date(b.deadline);
-        if (quickHorizon === 'This Week') {
-          const nextWeek = new Date();
-          nextWeek.setDate(now.getDate() + 7);
-          matchesRange = matchesRange && bidDate >= now && bidDate <= nextWeek;
-        } else if (quickHorizon === 'This Month') {
-          const nextMonth = new Date();
-          nextMonth.setMonth(now.getMonth() + 1);
-          matchesRange = matchesRange && bidDate >= now && bidDate <= nextMonth;
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        if (!bidDate) {
+          matchesRange = false;
+        } else {
+          if (quickHorizon === 'This Week') {
+            const startOfWeek = new Date(today);
+            startOfWeek.setDate(today.getDate() - today.getDay());
+            matchesRange = matchesRange && bidDate >= startOfWeek;
+          } else if (quickHorizon === 'This Month') {
+            const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+            matchesRange = matchesRange && bidDate >= startOfMonth;
+          }
         }
       }
 
       return matchesStatus && matchesStage && matchesSearch && matchesSolution && matchesRange;
     });
-  }, [bids, filterStatus, filterStage, searchQuery, filterSolution, quickHorizon, dateRange]);
+  }, [bids, filterStatus, filterStage, searchQuery, filterSolution, quickHorizon, dateType, dateRange]);
 
   const getDaysBetween = (start: string, end: string) => {
     const s = new Date(start);
@@ -292,9 +321,33 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
           {/* Row 2: Range, Phase, Solution */}
           <div className="flex flex-wrap items-end gap-8">
             <div className="space-y-2 min-w-[280px]">
-              <div className="flex items-center gap-2 mb-1">
-                <Clock size={12} className="text-slate-400" />
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Custom Range</label>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <Clock size={12} className="text-slate-400" />
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Custom Range</label>
+                </div>
+
+                {/* Date Type Selector - From AllBids */}
+                <div className="bg-slate-100 p-0.5 rounded-lg border border-slate-200 flex gap-0.5">
+                  {[
+                    { id: 'received', label: 'Intake' },
+                    { id: 'deadline', label: 'Due' },
+                    { id: 'published', label: 'Published' }
+                  ].map((type) => (
+                    <button
+                      key={type.id}
+                      onClick={() => setDateType(type.id as any)}
+                      className={clsx(
+                        "px-2 py-1 rounded-md text-[8px] font-black uppercase tracking-wider transition-all",
+                        dateType === type.id
+                          ? "bg-white text-slate-900 shadow-sm border border-slate-100"
+                          : "text-slate-400 hover:text-slate-600"
+                      )}
+                    >
+                      {type.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="flex items-center gap-3">
                 <div className="relative flex-1">
@@ -356,7 +409,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
                 placeholder="SEARCH BIDS..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-xs font-black uppercase tracking-widest placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-14 pr-4 py-2.5 text-xs font-black uppercase tracking-widest placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
               />
               {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X size={14} /></button>}
             </div>

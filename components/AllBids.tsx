@@ -19,11 +19,13 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
     const [solutionFilter, setSolutionFilter] = useState<string>('All');
     const [startDate, setStartDate] = useState<string>('');
     const [endDate, setEndDate] = useState<string>('');
+    const [dateType, setDateType] = useState<string>('received');
 
     const filteredBids = useMemo(() => {
         return bids.filter(bid => {
             // Search Filter
-            const matchesSearch = bid.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            const matchesSearch = !searchQuery ||
+                bid.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 bid.customerName.toLowerCase().includes(searchQuery.toLowerCase());
 
             // Status Filter
@@ -33,33 +35,72 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
             const matchesPhase = phaseFilter === 'All' || bid.currentStage === phaseFilter;
 
             // Solution Filter
-            const matchesSolution = solutionFilter === 'All' || bid.requiredSolutions.includes(solutionFilter);
+            const matchesSolution = solutionFilter === 'All' || (bid.requiredSolutions && bid.requiredSolutions.includes(solutionFilter));
 
-            // Date Filtering Logic
-            const bidDate = new Date(bid.receivedDate);
+            // Date Filtering Logic - Use local date parsing to avoid timezone shifts
+            const parseLocalDate = (dateStr: string) => {
+                if (!dateStr) return null;
+                const [y, m, d] = dateStr.split('-').map(Number);
+                return new Date(y, m - 1, d);
+            };
+
+            // Determine which date to filter by
+            let targetDateStr = bid.receivedDate;
+            if (dateType === 'deadline') targetDateStr = bid.deadline;
+            if (dateType === 'published') targetDateStr = bid.publishDate || '';
+
+            const bidDate = parseLocalDate(targetDateStr);
+
+            // If filtering by a date that doesn't exist for the bid (e.g. published), exclude correctly or decide behavior
+            // Here assuming if date is missing, it doesn't match date filters
+            if (!bidDate) {
+                // If we have specific date filters active, exclude. If no date filters, include (unless checking specifically)
+                // However, logic below requires bidDate for comparison.
+                // If user wants "This Week" by "Published Date" and bid has no published date, it should match "false".
+                // So we can just set matchesHorizon/Timeline to false if no date.
+                // But wait, if NO date range is selected, it should pass?
+                // Let's handle it inside:
+            }
+
             const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
             // Quick Horizon Filter
             let matchesHorizon = true;
-            if (quickHorizon === 'This Week') {
-                const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
-                matchesHorizon = bidDate >= startOfWeek;
-            } else if (quickHorizon === 'This Month') {
-                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-                matchesHorizon = bidDate >= startOfMonth;
+            if (bidDate) {
+                if (quickHorizon === 'This Week') {
+                    const startOfWeek = new Date(today);
+                    startOfWeek.setDate(today.getDate() - today.getDay());
+                    matchesHorizon = bidDate >= startOfWeek;
+                } else if (quickHorizon === 'This Month') {
+                    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+                    matchesHorizon = bidDate >= startOfMonth;
+                }
+            } else if (quickHorizon !== 'All') {
+                matchesHorizon = false; // Filter active but no date to check
             }
 
             // Custom Timeline Filter
             let matchesTimeline = true;
-            if (startDate && endDate) {
-                const s = new Date(startDate);
-                const e = new Date(endDate);
-                matchesTimeline = bidDate >= s && bidDate <= e;
+            if (startDate || endDate) {
+                if (!bidDate) {
+                    matchesTimeline = false;
+                } else {
+                    if (startDate) {
+                        const s = parseLocalDate(startDate);
+                        matchesTimeline = matchesTimeline && (s ? bidDate >= s : true);
+                    }
+                    if (endDate) {
+                        const e = parseLocalDate(endDate);
+                        if (e) e.setHours(23, 59, 59, 999);
+                        matchesTimeline = matchesTimeline && (e ? bidDate <= e : true);
+                    }
+                }
             }
 
             return matchesSearch && matchesStatus && matchesPhase && matchesSolution && matchesHorizon && matchesTimeline;
         });
-    }, [bids, searchQuery, statusFilter, phaseFilter, solutionFilter, quickHorizon, startDate, endDate]);
+    }, [bids, searchQuery, statusFilter, phaseFilter, solutionFilter, quickHorizon, startDate, endDate, dateType]);
 
     const statusOptions = [
         { label: 'ALL', value: 'All', icon: <Filter size={18} />, color: 'bg-[#0F172A] text-white border-transparent' },
@@ -148,9 +189,34 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
 
                     {/* Custom Timeline Area - Compact sizing */}
                     <div className="space-y-3 xl:col-span-5">
-                        <label className="text-[9px] font-black text-[#94A3B8] uppercase tracking-[0.2em] ml-1 flex items-center gap-2">
-                            <Clock size={12} className="text-slate-400" /> Custom Range
-                        </label>
+                        <div className="flex justify-between items-center">
+                            <label className="text-[9px] font-black text-[#94A3B8] uppercase tracking-[0.2em] ml-1 flex items-center gap-2">
+                                <Clock size={12} className="text-slate-400" /> Custom Range
+                            </label>
+
+                            {/* Date Type Selector */}
+                            <div className="bg-[#F8FAFC] p-0.5 rounded-lg border border-slate-100 flex gap-0.5">
+                                {[
+                                    { id: 'received', label: 'Intake' },
+                                    { id: 'deadline', label: 'Due' },
+                                    { id: 'published', label: 'Published' }
+                                ].map((type) => (
+                                    <button
+                                        key={type.id}
+                                        onClick={() => setDateType(type.id)}
+                                        className={clsx(
+                                            "px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-wider transition-all",
+                                            dateType === type.id
+                                                ? "bg-white text-[#1E293B] shadow-sm border border-slate-100"
+                                                : "text-slate-400 hover:text-slate-600"
+                                        )}
+                                    >
+                                        {type.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
                         <div className="flex items-center gap-2">
                             <div className="relative flex-1 max-w-[180px]">
                                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />

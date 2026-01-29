@@ -1,6 +1,28 @@
-import { GoogleGenerativeAI, SchemaType, GenerateContentResponse } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType, GenerateContentResponse, Part, Content } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.API_KEY!);
+
+// Model configuration
+const PRIMARY_MODEL = 'gemini-2.5-pro';
+const FALLBACK_MODEL = 'gemini-2.5-flash';
+
+// Event for toast notifications (will be picked up by UI)
+export type AINotification = {
+  type: 'info' | 'warning' | 'success' | 'error';
+  message: string;
+};
+
+let notificationCallback: ((notification: AINotification) => void) | null = null;
+
+export const setAINotificationCallback = (callback: (notification: AINotification) => void) => {
+  notificationCallback = callback;
+};
+
+const notify = (notification: AINotification) => {
+  if (notificationCallback) {
+    notificationCallback(notification);
+  }
+};
 
 /**
  * Utility to wrap AI calls with retry logic for 503 (Overloaded) and 429 (Rate Limit) errors.
@@ -36,7 +58,7 @@ const callAIWithRetry = async <T>(fn: () => Promise<T>, maxRetries = 5, initialD
 export const analyzeBidSecurityDocument = async (fileContentBase64: string, mimeType: string, requirement: string, customerName: string, tcvInclTax: number) => {
   try {
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -75,7 +97,7 @@ export const analyzeBidSecurityDocument = async (fileContentBase64: string, mime
 export const indexVaultDocument = async (fileName: string, contentBase64: string) => {
   try {
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -109,7 +131,7 @@ export const indexVaultDocument = async (fileName: string, contentBase64: string
 export const extractProposalOutline = async (tenderContentBase64: string) => {
   try {
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -122,9 +144,10 @@ export const extractProposalOutline = async (tenderContentBase64: string) => {
                 properties: {
                   id: { type: SchemaType.STRING },
                   title: { type: SchemaType.STRING },
-                  description: { type: SchemaType.STRING }
+                  description: { type: SchemaType.STRING },
+                  type: { type: SchemaType.STRING, description: "narrative, form, table, or annexure" }
                 },
-                required: ["id", "title"]
+                required: ["id", "title", "description", "type"]
               }
             }
           },
@@ -138,165 +161,96 @@ export const extractProposalOutline = async (tenderContentBase64: string) => {
         role: 'user',
         parts: [
           { inlineData: { data: tenderContentBase64, mimeType: 'application/pdf' } },
-          { text: `Extract RFP response structure chapters and titles.` }
+          {
+            text: `ACT AS A SENIOR BID MANAGER. SCAN THIS RFP DOCUMENT.
+          
+          YOUR TASK:
+          1. Extract the full response structure requested by the customer.
+          2. Identify Technical Solution and Financial Solution chapters.
+          3. MANDATORY: Identify every Annexure, Bid Form, Affidavit, and Certificate mentioned.
+          4. For each section, provide a 'type' (narrative, form, table, or annexure) and a detailed 'description' of what needs to be produced.
+          
+          Output as a JSON object with 'sections' array.` }
         ]
       }]
     }));
     return JSON.parse(result.response.text());
   } catch (error) {
+    console.error("Outline extraction failed:", error);
     return { sections: [] };
   }
 };
 
 export const draftProposalSection = async (sectionTitle: string, sectionDescription: string, bid: any, documentContext: string) => {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
-    const result = await callAIWithRetry(() => model.generateContent(`Draft technical proposal for: "${sectionTitle}".`));
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
+
+    const bidContext = `
+      Project: ${bid.projectName}
+      Customer: ${bid.customerName}
+      Scope of Work: ${bid.scopeOfWork}
+      Solutions: ${bid.requiredSolutions.join(', ')}
+      Deliverables: ${(bid.deliverablesSummary || []).map((d: any) => `${d.item} (Qty: ${d.quantity})`).join(', ')}
+    `;
+
+    const prompt = `ACT AS A TECHNICAL PROPOSAL WRITER & DOCUMENT ENGINEER.
+    
+    YOUR OBJECTIVE:
+    Draft a high-fidelity technical response for the section: "${sectionTitle}".
+    
+    INSTRUCTIONS / REQUIREMENTS:
+    - ${sectionDescription}
+    - UTILIZE CONTEXT: Use the following project data and technical documents to accurately fill in details:
+      PROJECT CONTEXT: ${bidContext}
+      TECHNICAL SOURCES: ${documentContext}
+    
+    OUTPUT PROTOCOL:
+    1. If the section is a FORM, ANNEXURE, or TABLE:
+       - REPRODUCE the exact layout using Markdown tables or structured fields.
+       - POPULATE it with data from the sources.
+       - Use "N/A" only if no data is available.
+    2. If the section is NARRATIVE:
+       - Write professional, persuasive technical content.
+       - Use Markdown for hierarchy (###, ####), **bolding**, and bullet points.
+    3. BRANDING: Maintain a professional, executive tone for "Jazz Business".
+    
+    GO!`;
+
+    const result = await callAIWithRetry(() => model.generateContent(prompt));
     return result.response.text().trim();
   } catch (error) {
+    console.error("Drafting failed:", error);
     return "AI drafting unavailable.";
   }
 };
 
 export const analyzeBidDocument = async (fileName: string, fileContentBase64: string) => {
   try {
-    console.log(`Analyzing Bid Document: ${fileName} (${Math.round(fileContentBase64.length / 1024)} KB)`);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: SchemaType.OBJECT,
-          properties: {
-            customerName: { type: SchemaType.STRING },
-            projectName: { type: SchemaType.STRING },
-            deadline: { type: SchemaType.STRING },
-            estimatedValue: { type: SchemaType.NUMBER },
-            currency: { type: SchemaType.STRING },
-            contractDuration: { type: SchemaType.STRING },
-            customerPaymentTerms: { type: SchemaType.STRING },
-            bidSecurity: { type: SchemaType.STRING },
-            requiredSolutions: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-            aiQualificationSummary: { type: SchemaType.STRING },
-            publishDate: { type: SchemaType.STRING },
-            complexity: { type: SchemaType.STRING, description: "Low, Medium, or High" },
-            preBidMeeting: {
-              type: SchemaType.OBJECT,
-              properties: {
-                date: { type: SchemaType.STRING },
-                time: { type: SchemaType.STRING },
-                location: { type: SchemaType.STRING },
-                isMandatory: { type: SchemaType.BOOLEAN },
-                notes: { type: SchemaType.STRING }
-              },
-              required: ["date", "time", "location", "isMandatory"]
-            },
-            deliverablesSummary: {
-              type: SchemaType.ARRAY,
-              items: {
-                type: SchemaType.OBJECT,
-                properties: {
-                  item: { type: SchemaType.STRING },
-                  quantity: { type: SchemaType.STRING },
-                  specs: { type: SchemaType.STRING, description: "Technical specs, model numbers, or performance metrics." },
-                  category: { type: SchemaType.STRING }
-                },
-                required: ["item", "quantity", "specs"]
-              }
-            },
-            scopeOfWork: { type: SchemaType.STRING },
-            summaryRequirements: { type: SchemaType.STRING },
-            technicalQualificationChecklist: {
-              type: SchemaType.ARRAY,
-              description: "Exhaustive list of all technical requirements, specs, SLAs, and technical evaluation criteria.",
-              items: {
-                type: SchemaType.OBJECT,
-                properties: {
-                  requirement: { type: SchemaType.STRING },
-                  type: { type: SchemaType.STRING, description: "Mandatory or Optional" },
-                  aiComment: { type: SchemaType.STRING, description: "Brief reason why this is a technical requirement." }
-                },
-                required: ["requirement", "type", "aiComment"]
-              }
-            },
-            complianceList: {
-              type: SchemaType.ARRAY,
-              description: "Exhaustive list of all general, legal, financial, and administrative compliance requirements.",
-              items: {
-                type: SchemaType.OBJECT,
-                properties: {
-                  requirement: { type: SchemaType.STRING },
-                  description: { type: SchemaType.STRING, description: "Brief explanation of the requirement." },
-                  isMandatory: { type: SchemaType.BOOLEAN }
-                },
-                required: ["requirement", "description", "isMandatory"]
-              }
-            },
-            financialFormats: {
-              type: SchemaType.ARRAY,
-              description: "Extracted Bill of Quantities (BOQ) or Schedule of Prices.",
-              items: {
-                type: SchemaType.OBJECT,
-                properties: {
-                  item: { type: SchemaType.STRING, description: "Title or Short Name of the item/service." },
-                  description: { type: SchemaType.STRING, description: "Full technical description if available." },
-                  uom: { type: SchemaType.STRING, description: "Unit of Measurement (e.g., Lot, Unit, Monthly, Year)." },
-                  quantity: { type: SchemaType.NUMBER, description: "Quantity required." }
-                },
-                required: ["item", "uom", "quantity"]
-              }
-            }
-          },
-          required: ["customerName", "projectName", "deadline", "estimatedValue", "currency", "contractDuration", "customerPaymentTerms", "bidSecurity", "requiredSolutions", "aiQualificationSummary", "scopeOfWork", "summaryRequirements", "technicalQualificationChecklist", "complianceList", "financialFormats"]
-        }
-      }
+
+
+    const response = await fetch('/api/ai/analyze-bid', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName, fileContentBase64 })
     });
 
-    const result = await callAIWithRetry(() => model.generateContent({
-      contents: [{
-        role: 'user',
-        parts: [
-          { inlineData: { data: fileContentBase64, mimeType: 'application/pdf' } },
-          {
-            text: `ACT AS A SENIOR BID MANAGER. YOUR MISSION: THOROUGHLY EXTRACT EVERY SINGLE COMPLIANCE REQUIREMENT FROM THIS TENDER.
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Server-side AI analysis failed');
+    }
 
-EXTRACT AND CATEGORIZE AS FOLLOWS:
-
-1. TECHNICAL COMPLIANCE (technicalQualificationChecklist): 
-   - Extract EVERY technical specification, performance SLA, hardware/software requirement, implementation timeline, and technical qualification.
-   - Comb through all sections: SOW, Technical Specs, Annexures.
-   - DO NOT MISS ANYTHING TECHNICAL.
-
-2. GENERAL COMPLIANCE (complianceList): 
-   - Extract EVERY administrative, legal, financial, and boilerplate requirement.
-   - Include: Bid Security details, ISO certifications, company registration documents, tax clearances, health & safety policies, litigation history requirements, insurance needs.
-   - DO NOT MISS ANYTHING ADMINISTRATIVE OR LEGAL.
-
-3. BILL OF QUANTITIES / PRICING TABLE (financialFormats):
-   - Locate the 'Schedule of Prices', 'Price Schedule', or 'BOQ' sections.
-   - Extract EVERY item listed with its Unit of Measurement (UOM) and Quantity.
-   - For services, Quantity might be 1 (Lot). For hardware, it's the count.
-   - DO NOT extract unit prices or total prices from the RFP yet, just the structure (items, descriptions, UOM, and qty).
-
-MANDATORY DATA FIELDS:
-- Submission Deadline: Look for 'Closing Date', 'Submission Date', or 'Deadline'. Format as YYYY-MM-DD.
-- Contract Duration: Look for 'Period', 'Years', 'Months', or 'Duration'. PREFERRED: Number of DAYS. Alternately: Use max 3-4 words (e.g. "24 Months").
-- Customer Payment Terms: Look for 'Payment Terms', 'Net', or 'Days'. PREFERRED: Number of DAYS. Alternately: Use max 3-4 words (e.g. "Net 45 Days").
-- Bid Security: Look for 'Earnest Money', 'Bid Bond', 'Security', or 'Guarantee'. Extract the amount or %.
-- Pre-Bid Meeting: MANDATORY. Extract Date, Time, Location, and if it's Mandatory. Search exhaustively for the meeting date.
-- Deliverables Summary: Identify physical hardware, connectivity links, or distinct services. Extract Name, Quantity, AND Key Technical Specifications/Specs for each.
-- Required Solutions: Match terms from: Quantica, GSM Data, M2M (Devices Only), IoT, IT Devices (Laptop/Desktop), Mobile Devices (Phone or Tablet), CPaaS, Cloud Solutions, Fixed Connectivity, System Integration.
-- Publish Date: The date the tender was released.
-- Complexity: Assess based on scale and requirements (Low/Medium/High).
-- Scope of Work & Project Brief: Provide comprehensive summaries.
-- BOQ: Exhaustive list of all line items required in the financial response.
-
-THOROUGHNESS IS CRITICAL. IF A REQUIREMENT OR PRICING ITEM IS MENTIONED IN ANY SECTION OR ANNEXURE, IT MUST BE EXTRACTED.` }
-        ]
-      }]
-    }));
-    return JSON.parse(result.response.text());
-  } catch (error) {
+    const result = await response.json();
+    notify({
+      type: 'success',
+      message: `AI analysis completed successfully.`
+    });
+    return result;
+  } catch (error: any) {
+    console.error("Analysis Error:", error);
+    notify({
+      type: 'error',
+      message: `AI analysis failed: ${error.message || 'Network error'}. Please try again.`
+    });
     throw error;
   }
 };
@@ -304,10 +258,10 @@ THOROUGHNESS IS CRITICAL. IF A REQUIREMENT OR PRICING ITEM IS MENTIONED IN ANY S
 export const analyzeComplianceDocuments = async (criteria: string, checklist: any[], documents: any[]) => {
   try {
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
-        maxOutputTokens: 8192,
+        maxOutputTokens: 16384,
         responseSchema: {
           type: SchemaType.OBJECT,
           properties: {
@@ -368,7 +322,7 @@ export const analyzeComplianceDocuments = async (criteria: string, checklist: an
       }]
     }));
     const text = result.response.text();
-    console.log("AI Compliance Response Received:", text.substring(0, 500) + "...");
+
     return JSON.parse(text);
   } catch (error) {
     console.error("Compliance Analysis Error (Detailed):", error);
@@ -379,7 +333,7 @@ export const analyzeComplianceDocuments = async (criteria: string, checklist: an
 export const tagTechnicalDocuments = async (documents: any[]) => {
   try {
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -412,7 +366,7 @@ export const tagTechnicalDocuments = async (documents: any[]) => {
 export const analyzePricingDocument = async (fileContentBase64: string, duration: string, formats: any[], mimeType: string = 'application/pdf') => {
   try {
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -456,7 +410,7 @@ export const analyzePricingDocument = async (fileContentBase64: string, duration
           YOUR TASK:
           1. Map the unit prices from the uploaded document to the items in the pre-extracted BOQ structure.
           2. Calculate TCV (Total Contract Value) Excl. Tax and Incl. Tax (assume 17% tax if not specified).
-          3. Extract payment terms and verify contract duration.
+          3. Extract payment terms and verify contract duration. MANDATORY: Always convert contract duration to and return as Number of YEARS only (e.g. "2.5" instead of "912 days", "2" instead of "730 days").
           
           If an item in the uploaded document doesn't match the pre-extracted BOQ, include it as a new item in populatedFinancialFormat.` }
         ]
@@ -495,7 +449,7 @@ const sanitizeContext = (obj: any): any => {
 export const chatWithBidAssistant = async (question: string, context: any) => {
   try {
     const sanitizedContext = sanitizeContext(context);
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
     const result = await callAIWithRetry(() => model.generateContent(`Context: ${JSON.stringify(sanitizedContext)}. User: ${question}.`));
     return result.response.text();
   } catch (err: any) {
@@ -507,7 +461,7 @@ export const chatWithBidAssistant = async (question: string, context: any) => {
 export const analyzeNoBidReasons = async (noBidData: any[]) => {
   try {
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -539,7 +493,7 @@ export const analyzeNoBidReasons = async (noBidData: any[]) => {
 export const generateStrategicRiskAssessment = async (bid: any) => {
   try {
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -562,7 +516,29 @@ export const generateStrategicRiskAssessment = async (bid: any) => {
       }
     });
 
-    const result = await callAIWithRetry(() => model.generateContent(`Assess risks for ${bid.projectName}.`));
+    const result = await callAIWithRetry(() => model.generateContent({
+      contents: [{
+        role: 'user',
+        parts: [{
+          text: `ACT AS A SENIOR STRATEGIC RISK ANALYST.
+          
+          PROJECT CONTEXT:
+          - Project Name: ${bid.projectName}
+          - Customer: ${bid.customerName}
+          - Summary: ${bid.summaryRequirements}
+          - Scope of Work: ${bid.scopeOfWork}
+          - Compliance Items: ${(bid.complianceChecklist || []).map((c: any) => c.requirement).join(', ')}
+          - Technical Items: ${(bid.technicalQualificationChecklist || []).map((t: any) => t.requirement).join(', ')}
+          
+          YOUR TASK:
+          1. IDENTIFY FRICTION POINTS: Look for high-risk elements in the SOW or Compliance requirements (e.g., tight deadlines, complex SLAs, missing credentials).
+          2. ASSESS SEVERITY: Categorize as High (Showstopper) or Medium (Needs Mitigation).
+          3. MITIGATION PLAN: Provide 3-5 high-priority, actionable steps to address the identified risks.
+          
+          Return your findings in JSON format.`
+        }]
+      }]
+    }));
     return JSON.parse(result.response.text());
   } catch (error) {
     return null;
@@ -582,7 +558,7 @@ export const analyzeSolutioningDocuments = async (bid: any, documents: any[]) =>
     }
 
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -632,9 +608,14 @@ export const analyzeSolutioningDocuments = async (bid: any, documents: any[]) =>
         ]
       }]
     }));
-    return result.response.text();
   } catch (error) {
-    return JSON.stringify({ solutionFit: "Error", gapAnalysis: [], recommendations: ["AI Analysis Failed."] });
+    console.error("Solution Analysis error:", error);
+    return JSON.stringify({
+      solutionFit: "Error",
+      fitExplanation: "AI Alignment analysis encountered an issue. This can happen if the documents are too large or the service is temporarily overloaded.",
+      gapAnalysis: [{ component: "General", gap: "Analysis unavailable", impact: "High" }],
+      recommendations: ["Check your internet connection.", "Try re-running the check in a few moments.", "Ensure PDFs are not password protected."]
+    });
   }
 };
 
@@ -646,7 +627,7 @@ export const generateFinalRiskAssessment = async (bid: any, documents: any[]) =>
       .map(d => ({ inlineData: { data: d.fileData, mimeType: 'application/pdf' } }));
 
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-pro',
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -663,7 +644,20 @@ export const generateFinalRiskAssessment = async (bid: any, documents: any[]) =>
     const result = await callAIWithRetry(() => model.generateContent({
       contents: [{
         role: 'user',
-        parts: [...docParts, { text: `Evaluate readiness.` }]
+        parts: [
+          ...docParts,
+          {
+            text: `ACT AS A FINAL BID GOVERNANCE REVIEWER.
+          
+          PROJECT: ${bid.projectName}
+          TCV: ${bid.tcvInclTax || 'TBD'}
+          
+          YOUR TASK:
+          Based on all provided documents (Proposal, Pricing, Compliance docs), evaluate the final readiness of this bid.
+          1. Highlight any remaining gaps or missing documents.
+          2. Provide an overall readiness assessment (e.g., "Ready for Submission" or "Critical Gaps").
+          3. List final 3-5 mitigation steps if any risks remain.` }
+        ]
       }]
     }));
     return JSON.parse(result.response.text());

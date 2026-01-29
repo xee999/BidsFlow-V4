@@ -28,22 +28,18 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
         return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
     };
 
-    const getPhaseTargetDays = (totalDays: number, complexity: string, stage: string) => {
-        let weight = 0.2; // Default
-        if (complexity === 'High') {
-            if (stage === BidStage.SOLUTIONING) weight = 0.5;
-            else if (stage === BidStage.PRICING) weight = 0.1;
-            else weight = 0.1;
-        } else if (complexity === 'Medium') {
-            if (stage === BidStage.SOLUTIONING) weight = 0.35;
-            else if (stage === BidStage.PRICING) weight = 0.15;
-            else weight = 0.125;
-        } else {
-            if (stage === BidStage.SOLUTIONING) weight = 0.25;
-            else if (stage === BidStage.PRICING) weight = 0.2;
-            else weight = 0.15;
-        }
-        return Math.round(totalDays * weight) || 1;
+    // Phase weights by complexity - High prioritizes Solutioning (60%) and Pricing (25%)
+    const PHASE_WEIGHTS: Record<string, Record<string, number>> = {
+        High: { Intake: 0.01, Qualification: 0.05, Solutioning: 0.60, Pricing: 0.25, Compliance: 0.07, 'Final Review': 0.02 },
+        Medium: { Intake: 0.02, Qualification: 0.08, Solutioning: 0.45, Pricing: 0.25, Compliance: 0.18, 'Final Review': 0.02 },
+        Low: { Intake: 0.05, Qualification: 0.10, Solutioning: 0.40, Pricing: 0.25, Compliance: 0.18, 'Final Review': 0.02 }
+    };
+
+    const getPhaseTargetDays = (totalDays: number, complexity: string = 'Medium', stage: string) => {
+        const weights = PHASE_WEIGHTS[complexity] || PHASE_WEIGHTS.Medium;
+        const weight = weights[stage] || 0.1;
+        // Support fractional days, minimum 0.5d
+        return Math.max(0.5, parseFloat((totalDays * weight).toFixed(1)));
     };
 
     const stats = useMemo(() => {

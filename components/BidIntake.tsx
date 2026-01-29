@@ -1,9 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, X, Loader2, Sparkles, CheckCircle, Info, Trash2, ChevronDown, ShieldCheck, Briefcase, Globe, MapPin, AlertCircle, AlertTriangle, CheckSquare, FileSpreadsheet, Package } from 'lucide-react';
 import { BidRecord, BidStage, BidStatus, RiskLevel, ComplianceItem, QualificationItem, TechnicalDocument } from '../types.ts';
-import { analyzeBidDocument } from '../services/gemini.ts';
+import { analyzeBidDocument, setAINotificationCallback, AINotification } from '../services/gemini.ts';
 import { SOLUTION_OPTIONS } from '../constants.tsx';
 import { clsx } from 'clsx';
+import { convertToDays, convertToYears, sanitizeDateValue, sanitizeTimeValue } from '../services/utils.ts';
+import Toast, { ToastMessage } from './Toast.tsx';
 
 interface BidIntakeProps {
   onCancel: () => void;
@@ -14,6 +16,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [formData, setFormData] = useState<Partial<BidRecord>>({
     customerName: '',
     projectName: '',
@@ -45,6 +48,26 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
     financialFormats: [],
     technicalDocuments: []
   });
+
+  // Toast handling
+  const addToast = useCallback((notification: AINotification) => {
+    const toast: ToastMessage = {
+      id: `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: notification.type,
+      message: notification.message
+    };
+    setToasts(prev => [...prev, toast]);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // Subscribe to AI notifications on mount
+  useEffect(() => {
+    setAINotificationCallback(addToast);
+    return () => setAINotificationCallback(() => { });
+  }, [addToast]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -108,7 +131,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
             ...prev,
             customerName: result.customerName || prev.customerName,
             projectName: result.projectName || prev.projectName,
-            deadline: result.deadline || prev.deadline,
+            deadline: sanitizeDateValue(result.deadline) || prev.deadline,
             estimatedValue: Number(result.estimatedValue) || prev.estimatedValue || 0,
             currency: result.currency || prev.currency || 'PKR',
             bidSecurity: result.bidSecurity || prev.bidSecurity || '',
@@ -118,12 +141,16 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
             requiredSolutions: Array.from(new Set([...matchedSolutions])),
             complianceChecklist: extractedCompliance,
             technicalQualificationChecklist: extractedQualChecklist,
-            contractDuration: result.contractDuration || prev.contractDuration || '',
+            contractDuration: convertToYears(result.contractDuration || prev.contractDuration || ''),
             customerPaymentTerms: result.customerPaymentTerms || prev.customerPaymentTerms || '',
             financialFormats: result.financialFormats || prev.financialFormats || [],
-            publishDate: result.publishDate || prev.publishDate,
+            publishDate: sanitizeDateValue(result.publishDate) || prev.publishDate,
             complexity: (result.complexity as any) || prev.complexity,
-            preBidMeeting: result.preBidMeeting || prev.preBidMeeting,
+            preBidMeeting: result.preBidMeeting ? {
+              ...result.preBidMeeting,
+              date: sanitizeDateValue(result.preBidMeeting.date),
+              time: sanitizeTimeValue(result.preBidMeeting.time)
+            } : prev.preBidMeeting,
             deliverablesSummary: result.deliverablesSummary || prev.deliverablesSummary || [],
             technicalDocuments: [tenderDoc]
           }));
@@ -315,7 +342,19 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <InputField label="Contract Duration*" value={formData.contractDuration} error={errors.contractDuration} onChange={v => { setFormData({ ...formData, contractDuration: v }); if (v) setErrors(p => ({ ...p, contractDuration: false })); }} placeholder="e.g. 24 Months" />
+            <InputField
+              label="Contract Duration (Years)*"
+              value={formData.contractDuration}
+              error={errors.contractDuration}
+              onChange={v => { setFormData({ ...formData, contractDuration: v }); if (v) setErrors(p => ({ ...p, contractDuration: false })); }}
+              onBlur={() => {
+                if (formData.contractDuration) {
+                  const converted = convertToYears(formData.contractDuration);
+                  setFormData(prev => ({ ...prev, contractDuration: converted }));
+                }
+              }}
+              placeholder="e.g. 2.5"
+            />
             <InputField label="Payment Terms (Net Days)*" value={formData.customerPaymentTerms} onChange={v => setFormData({ ...formData, customerPaymentTerms: v })} placeholder="e.g. 45" />
           </div>
 
@@ -541,17 +580,19 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
           </div>
         </div>
       </form>
+      <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 };
 
-const InputField: React.FC<{ label: string; value?: string | number; error?: boolean; onChange: (v: string) => void; type?: string; placeholder?: string }> = ({ label, value, error, onChange, type = "text", placeholder }) => (
+const InputField: React.FC<{ label: string; value?: string | number; error?: boolean; onChange: (v: string) => void; onBlur?: () => void; type?: string; placeholder?: string }> = ({ label, value, error, onChange, onBlur, type = "text", placeholder }) => (
   <div>
     <label className={clsx("block text-[10px] font-black uppercase tracking-widest mb-2 ml-1 transition-colors", error ? "text-red-500" : "text-slate-500")}>{label}</label>
     <input
       type={type}
       value={value || ''}
       onChange={e => onChange(e.target.value)}
+      onBlur={onBlur}
       placeholder={placeholder}
       className={clsx(
         "w-full rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:outline-none transition-all",

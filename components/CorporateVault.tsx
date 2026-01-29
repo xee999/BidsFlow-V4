@@ -16,7 +16,7 @@ import { indexVaultDocument } from '../services/gemini.ts';
 import { vaultApi } from '../services/api.ts';
 import { clsx } from 'clsx';
 
-const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> = ({ assets, setAssets }) => {
+const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; userRole?: string }> = ({ assets, setAssets, userRole }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('All Documents');
   const [editingAsset, setEditingAsset] = useState<TechnicalDocument | null>(null);
@@ -140,15 +140,19 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
             <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] ml-8">Technical Library • {assets.length} Assets</p>
           </div>
           <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 px-5 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-[11px] font-black text-slate-700 hover:bg-slate-100 transition-all shadow-sm uppercase">
-              <Sparkles size={16} className="text-amber-500" /> Auto-Group Files
-            </button>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-3 px-8 py-3 bg-[#D32F2F] text-white rounded-2xl text-[11px] font-black shadow-2xl hover:bg-red-700 transition-all active:scale-95 uppercase tracking-widest"
-            >
-              <Plus size={18} /> New File
-            </button>
+            {userRole !== 'VIEWER' && (
+              <button className="flex items-center gap-2 px-5 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-[11px] font-black text-slate-700 hover:bg-slate-100 transition-all shadow-sm uppercase">
+                <Sparkles size={16} className="text-amber-500" /> Auto-Group Files
+              </button>
+            )}
+            {userRole !== 'VIEWER' && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-3 px-8 py-3 bg-[#D32F2F] text-white rounded-2xl text-[11px] font-black shadow-2xl hover:bg-red-700 transition-all active:scale-95 uppercase tracking-widest"
+              >
+                <Plus size={18} /> New File
+              </button>
+            )}
           </div>
         </div>
 
@@ -346,12 +350,16 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any }> 
               <button className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all flex items-center justify-center gap-3 shadow-sm">
                 <Download size={18} /> Download
               </button>
-              <button onClick={() => setEditingAsset(viewingAsset)} className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all flex items-center justify-center gap-3 shadow-sm">
-                <Edit3 size={18} /> Edit Details
-              </button>
-              <button onClick={() => deleteAsset(viewingAsset.id)} className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all flex items-center justify-center">
-                <Trash2 size={24} />
-              </button>
+              {userRole !== 'VIEWER' && (
+                <button onClick={() => setEditingAsset(viewingAsset)} className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all flex items-center justify-center gap-3 shadow-sm">
+                  <Edit3 size={18} /> Edit Details
+                </button>
+              )}
+              {userRole !== 'VIEWER' && (
+                <button onClick={() => deleteAsset(viewingAsset.id)} className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all flex items-center justify-center">
+                  <Trash2 size={24} />
+                </button>
+              )}
             </div>
           </div>
         </div>

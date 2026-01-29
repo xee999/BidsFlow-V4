@@ -3,9 +3,17 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Bid } from './models/Bid.ts';
-import { VaultAsset } from './models/VaultAsset.ts';
-import { AuditLog } from './models/AuditLog.ts';
+import cookieParser from 'cookie-parser';
+import { Bid } from './models/Bid.js';
+import { VaultAsset } from './models/VaultAsset.js';
+import { AuditLog } from './models/AuditLog.js';
+import { User } from './models/User.js';
+import { analyzeBidDocumentServer } from './middleware/ai.js';
+import authRoutes from './routes/auth.js';
+import userRoutes from './routes/users.js';
+import rolesRoutes from './routes/roles.js';
+import { Role, seedBuiltInRoles } from './models/Role.js';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -18,25 +26,115 @@ const MONGODB_URI = process.env.MONGODB_URI;
 
 // Increase payload limit for base64 file data
 app.use(express.json({ limit: '50mb' }));
+app.use(cookieParser());
+
+// Request logging middleware
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+});
 
 // MongoDB Connection Logic
 if (MONGODB_URI) {
-    mongoose.connect(MONGODB_URI)
-        .then(() => console.log('Connected to MongoDB'))
+    mongoose.connect(MONGODB_URI, {
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 10000,
+    })
+        .then(async () => {
+            console.log('Connected to MongoDB');
+            // Create default admin user if none exists
+            await createDefaultAdmin();
+            // Seed built-in roles
+            await seedBuiltInRoles();
+        })
         .catch(err => console.error('MongoDB connection error:', err));
 } else {
     console.warn('MONGODB_URI not provided. Skipping DB connection.');
 }
 
+// Create default admin user on first startup
+async function createDefaultAdmin() {
+    try {
+        // Migration: Update any existing MASTER_ADMIN roles to SUPER_ADMIN
+        const migrationResult = await User.updateMany(
+            { role: 'MASTER_ADMIN' },
+            { $set: { role: 'SUPER_ADMIN' } }
+        );
+        if (migrationResult.modifiedCount > 0) {
+            console.log(`✓ Migrated ${migrationResult.modifiedCount} users from MASTER_ADMIN to SUPER_ADMIN`);
+        }
+
+        const adminExists = await User.findOne({ role: 'SUPER_ADMIN' });
+        if (!adminExists) {
+            const defaultAdmin = new User({
+                id: `user-${crypto.randomUUID()}`,
+                email: 'admin@bidsflow.com',
+                password: 'Smart@4ever',
+                name: 'Super Admin',
+                role: 'SUPER_ADMIN',
+                isActive: true,
+            });
+            await defaultAdmin.save();
+            console.log('Default admin user created: admin@bidsflow.com / Smart@4ever');
+        }
+    } catch (err) {
+        console.error('Error creating default admin:', err);
+    }
+}
+
+// Middleware to check DB connection
+const checkDbConnection = (req, res, next) => {
+    if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({
+            error: 'Database disconnected',
+            details: 'The server is unable to connect to the database. Please ensure MongoDB is running.'
+        });
+    }
+    next();
+};
+
+// =============================================================================
 // API Routes
+// =============================================================================
 
 // Health check
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected' });
+    res.json({
+        status: 'ok',
+        database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        timestamp: new Date().toISOString()
+    });
 });
 
-// Bids
-app.get('/api/bids', async (req, res) => {
+// AI Analysis Proxy
+app.post('/api/ai/analyze-bid', async (req, res) => {
+    try {
+        const { fileName, fileContentBase64 } = req.body;
+        if (!fileContentBase64) {
+            return res.status(400).json({ error: 'File content is required' });
+        }
+        console.log(`Server handling AI analysis for: ${fileName} (${Math.round(fileContentBase64.length / 1024)} KB)`);
+        const result = await analyzeBidDocumentServer(fileName, fileContentBase64);
+        res.json(result);
+    } catch (err) {
+        console.error('Server-side AI analysis error:', err);
+        res.status(500).json({ error: err.message || 'AI analysis failed on server' });
+    }
+});
+
+// =============================================================================
+// Authentication & User Management Routes
+// =============================================================================
+
+app.use('/api/auth', checkDbConnection, authRoutes);
+app.use('/api/users', checkDbConnection, userRoutes);
+app.use('/api/roles', checkDbConnection, rolesRoutes);
+
+// =============================================================================
+// Bids Routes
+// =============================================================================
+
+app.get('/api/bids', checkDbConnection, async (req, res) => {
     try {
         const bids = await Bid.find().sort({ createdAt: -1 });
         res.json(bids);
@@ -45,7 +143,7 @@ app.get('/api/bids', async (req, res) => {
     }
 });
 
-app.post('/api/bids', async (req, res) => {
+app.post('/api/bids', checkDbConnection, async (req, res) => {
     try {
         const bid = new Bid(req.body);
         await bid.save();
@@ -55,7 +153,7 @@ app.post('/api/bids', async (req, res) => {
     }
 });
 
-app.put('/api/bids/:id', async (req, res) => {
+app.put('/api/bids/:id', checkDbConnection, async (req, res) => {
     try {
         const bid = await Bid.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
         if (!bid) return res.status(404).json({ error: 'Bid not found' });
@@ -65,7 +163,7 @@ app.put('/api/bids/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/bids/:id', async (req, res) => {
+app.delete('/api/bids/:id', checkDbConnection, async (req, res) => {
     try {
         const bid = await Bid.findOneAndDelete({ id: req.params.id });
         if (!bid) return res.status(404).json({ error: 'Bid not found' });
@@ -75,8 +173,11 @@ app.delete('/api/bids/:id', async (req, res) => {
     }
 });
 
-// Vault Assets
-app.get('/api/vault', async (req, res) => {
+// =============================================================================
+// Vault Assets Routes
+// =============================================================================
+
+app.get('/api/vault', checkDbConnection, async (req, res) => {
     try {
         const assets = await VaultAsset.find().sort({ createdAt: -1 });
         res.json(assets);
@@ -85,7 +186,7 @@ app.get('/api/vault', async (req, res) => {
     }
 });
 
-app.post('/api/vault', async (req, res) => {
+app.post('/api/vault', checkDbConnection, async (req, res) => {
     try {
         const asset = new VaultAsset(req.body);
         await asset.save();
@@ -95,7 +196,7 @@ app.post('/api/vault', async (req, res) => {
     }
 });
 
-app.put('/api/vault/:id', async (req, res) => {
+app.put('/api/vault/:id', checkDbConnection, async (req, res) => {
     try {
         const asset = await VaultAsset.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
         if (!asset) return res.status(404).json({ error: 'Asset not found' });
@@ -105,7 +206,7 @@ app.put('/api/vault/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/vault/:id', async (req, res) => {
+app.delete('/api/vault/:id', checkDbConnection, async (req, res) => {
     try {
         const asset = await VaultAsset.findOneAndDelete({ id: req.params.id });
         if (!asset) return res.status(404).json({ error: 'Asset not found' });
@@ -115,17 +216,34 @@ app.delete('/api/vault/:id', async (req, res) => {
     }
 });
 
-// Audit Logs
-app.get('/api/audit', async (req, res) => {
+// =============================================================================
+// Audit Logs Routes
+// =============================================================================
+
+app.get('/api/audit', checkDbConnection, async (req, res) => {
     try {
-        const logs = await AuditLog.find().sort({ createdAt: -1 }).limit(100);
-        res.json(logs);
+        const logs = await AuditLog.find().sort({ createdAt: -1 }).limit(100).lean();
+
+        // Fetch all roles to create a lookup map
+        const roles = await Role.find({});
+        const roleMap = roles.reduce((acc, role) => {
+            acc[role.id] = role.name;
+            return acc;
+        }, {});
+
+        // Enrich logs with role names
+        const enrichedLogs = logs.map(log => ({
+            ...log,
+            userRoleName: roleMap[log.userRole] || log.userRole
+        }));
+
+        res.json(enrichedLogs);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-app.post('/api/audit', async (req, res) => {
+app.post('/api/audit', checkDbConnection, async (req, res) => {
     try {
         const log = new AuditLog(req.body);
         await log.save();
@@ -135,11 +253,15 @@ app.post('/api/audit', async (req, res) => {
     }
 });
 
+// =============================================================================
+// Static Files & Catch-all
+// =============================================================================
+
 // Serve static files from the Vite build directory
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // All other requests serve the React app
-app.get('*', (req, res) => {
+app.use((req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 

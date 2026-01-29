@@ -2,16 +2,16 @@ import mongoose from 'mongoose';
 
 const BidSchema = new mongoose.Schema({
     id: { type: String, required: true, unique: true },
-    customerName: { type: String, required: true },
-    projectName: { type: String, required: true },
-    deadline: { type: String, required: true },
-    receivedDate: { type: String, required: true },
-    status: { type: String, required: true },
-    currentStage: { type: String, required: true },
-    riskLevel: { type: String, required: true },
-    estimatedValue: { type: Number, required: true },
-    currency: { type: String, required: true },
-    bidSecurity: { type: String, required: true },
+    customerName: String,
+    projectName: String,
+    deadline: String,
+    receivedDate: String,
+    status: String,
+    currentStage: String,
+    riskLevel: { type: String, default: 'Low' },
+    estimatedValue: { type: Number, default: 0 },
+    currency: { type: String, default: 'PKR' },
+    bidSecurity: { type: String, default: '' },
     requiredSolutions: [String],
     summaryRequirements: String,
     scopeOfWork: String,
@@ -61,6 +61,7 @@ const BidSchema = new mongoose.Schema({
     preBidMeeting: mongoose.Schema.Types.Mixed,
     deliverablesSummary: [mongoose.Schema.Types.Mixed],
     integrityScoreBreakdown: mongoose.Schema.Types.Mixed,
+    phaseTargets: mongoose.Schema.Types.Map,
 }, { timestamps: true });
 
 export const Bid = mongoose.model('Bid', BidSchema);

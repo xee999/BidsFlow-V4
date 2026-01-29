@@ -1,8 +1,8 @@
 
 import React, { useMemo } from 'react';
-import { 
-  TrendingUp, Clock, AlertCircle, ArrowUpRight, Plus, 
-  Calendar, Activity, CheckCircle2, Briefcase, 
+import {
+  TrendingUp, Clock, AlertCircle, ArrowUpRight, Plus,
+  Calendar, Activity, CheckCircle2, Briefcase,
   Target, Ban, DollarSign, Zap, Sparkles, ShieldAlert,
   FileWarning
 } from 'lucide-react';
@@ -40,6 +40,8 @@ const SOLUTION_COLORS: Record<string, { bg: string, text: string, border: string
 };
 
 const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid, onViewBid, onNavigateToFilter }) => {
+  const [sortBy, setSortBy] = React.useState<'priority' | 'due' | 'intake'>('priority');
+
   const currentMonthName = useMemo(() => {
     return new Date().toLocaleString('default', { month: 'long' }).toUpperCase();
   }, []);
@@ -75,21 +77,67 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
     let reason = "Standard Track";
     let icon = <Briefcase size={12} />;
     const daysLeft = getDaysLeft(bid.deadline);
-    const missingDocs = bid.complianceChecklist.filter(c => c.status === 'Pending').length;
-    if (daysLeft <= 3) { score += 100; reason = "Critical Deadline"; icon = <Clock size={12} className="text-red-500" />; }
-    else if (daysLeft <= 7) { score += 50; }
-    if (bid.estimatedValue >= 100000000) { score += 60; if (score < 100) { reason = "High Value Strategic"; icon = <DollarSign size={12} className="text-amber-500" />; } }
-    if (missingDocs > 3 && daysLeft < 10) { score += 40; if (score < 100) { reason = "Compliance Gap"; icon = <FileWarning size={12} className="text-orange-500" />; } }
-    if (bid.riskLevel === RiskLevel.HIGH) { score += 80; reason = "Risk Intervention"; icon = <ShieldAlert size={12} className="text-red-500" />; }
+    const integrity = calculateIntegrity(bid);
+
+    // 1. Highest Revenue (Scale: 1 point per 1M PKR)
+    const revenueM = (bid.estimatedValue || 0) / 1000000;
+    score += revenueM;
+
+    // 2. Critical Deadline (Huge boost for immediate urgency)
+    if (daysLeft <= 3) {
+      score += 500;
+      reason = "Critical Deadline";
+      icon = <Clock size={12} className="text-red-500" />;
+    } else if (daysLeft <= 7) {
+      score += 200;
+    }
+
+    // 3. High Risk Intervention
+    if (bid.riskLevel === RiskLevel.HIGH) {
+      score += 300;
+      if (reason === "Standard Track") {
+        reason = "Risk Intervention";
+        icon = <ShieldAlert size={12} className="text-red-500" />;
+      }
+    }
+
+    // 4. Behind in Target (Low integrity with approaching deadline)
+    const isBehind = integrity < 50 && daysLeft < 10;
+    if (isBehind) {
+      score += 250;
+      if (reason === "Standard Track") {
+        reason = "Behind Target";
+        icon = <AlertCircle size={12} className="text-orange-500" />;
+      }
+    }
+
+    // Aesthetic context if reason is still standard but it's high value
+    if (reason === "Standard Track" && revenueM >= 100) {
+      reason = "High Value Strategic";
+      icon = <DollarSign size={12} className="text-amber-500" />;
+    }
+
     return { score, reason, icon };
   };
 
   const prioritizedBids = useMemo(() => {
-    return bids
+    let mapped = bids
       .filter(b => b.status === BidStatus.ACTIVE)
-      .map(b => ({ ...b, aiContext: getPriorityContext(b), integrity: calculateIntegrity(b) }))
-      .sort((a, b) => b.aiContext.score - a.aiContext.score);
-  }, [bids]);
+      .map(b => ({ ...b, aiContext: getPriorityContext(b), integrity: calculateIntegrity(b) }));
+
+    if (sortBy === 'priority') {
+      // Sort by score descending (Highest Priority first)
+      mapped.sort((a, b) => b.aiContext.score - a.aiContext.score);
+    } else if (sortBy === 'due') {
+      // Nearest due date (Chronological ascending - soonest first)
+      mapped.sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+    } else if (sortBy === 'intake') {
+      // Last received (Chronological descending - newest first)
+      mapped.sort((a, b) => new Date(b.receivedDate).getTime() - new Date(a.receivedDate).getTime());
+    }
+
+    return mapped;
+  }, [bids, sortBy]);
 
   const stats = useMemo(() => {
     const active = bids.filter(b => b.status === BidStatus.ACTIVE);
@@ -104,17 +152,20 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
   const deadlines = [...prioritizedBids].sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime()).slice(0, 4);
 
   const getRoleDisplayName = (role: string) => {
-    switch(role) {
-      case 'BidsTeam': return 'Jazz Bids Team';
-      case 'Sales': return 'Jazz Sales Team';
-      case 'Management': return 'Jazz Management';
-      case 'Technical': return 'Jazz Technical Team';
-      default: return role;
-    }
+    const roleLabels: Record<string, string> = {
+      'SUPER_ADMIN': 'Super Admin',
+      'BID_TEAM': 'Bids Team',
+      'VIEWER': 'Viewer',
+      'BidsTeam': 'Jazz Bids Team',
+      'Sales': 'Jazz Sales Team',
+      'Management': 'Jazz Management',
+      'Technical': 'Jazz Technical Team'
+    };
+    return roleLabels[role] || role.replace(/_/g, ' ');
   };
 
   const getModalityIcon = (modality: ActivityLog['modality']) => {
-    switch(modality) {
+    switch (modality) {
       case 'sparkles': return <Sparkles size={14} className="text-amber-500" />;
       case 'zap': return <Zap size={14} className="text-[#D32F2F]" />;
       case 'check': return <CheckCircle2 size={14} className="text-emerald-500" />;
@@ -129,12 +180,14 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Bid Dashboard</h1>
           <p className="text-slate-500 mt-1 font-medium">
-            Welcome back, <span className="text-slate-900 font-bold">{user.name}</span> - <span className="text-[#D32F2F] font-bold">{getRoleDisplayName(user.role)}</span>
+            Welcome back, <span className="text-slate-900 font-bold">{user.name}</span> - <span className="text-[#D32F2F] font-bold">{user.roleName || getRoleDisplayName(user.role)}</span>
           </p>
         </div>
-        <button onClick={onNewBid} className="bg-[#D32F2F] hover:bg-[#B71C1C] text-white px-8 py-4 rounded-2xl font-black uppercase text-xs tracking-widest flex items-center gap-2 shadow-xl shadow-red-100 transition-all active:scale-95">
-          <Plus size={18} /> New Bid Intake
-        </button>
+        {user.role !== 'VIEWER' && (
+          <button onClick={onNewBid} className="bg-[#D32F2F] hover:bg-[#B71C1C] text-white px-8 py-4 rounded-2xl font-black uppercase text-xs tracking-widest flex items-center gap-2 shadow-xl shadow-red-100 transition-all active:scale-95">
+            <Plus size={18} /> New Bid Intake
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
@@ -148,18 +201,57 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
         <div className="xl:col-span-3 space-y-6">
           <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-8 border-b border-slate-50 flex justify-between items-center">
+            <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-white">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">Priority Pipeline</h2>
-                <span className="px-2 py-0.5 bg-red-50 text-[#D32F2F] text-[9px] font-black rounded uppercase tracking-widest border border-red-100 flex items-center gap-1">
-                  <Zap size={10} /> AI Optimized
-                </span>
+                <div className="flex flex-col">
+                  <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight leading-none">Priority Pipeline</h2>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="px-2 py-0.5 bg-red-50 text-[#D32F2F] text-[9px] font-black rounded uppercase tracking-widest border border-red-100 flex items-center gap-1">
+                      <Zap size={10} /> AI Optimized
+                    </span>
+                  </div>
+                </div>
               </div>
-              <button onClick={() => onNavigateToFilter('All')} className="text-xs font-black text-slate-400 hover:text-slate-900 transition-colors uppercase tracking-widest flex items-center gap-2">
-                Full Repository <ArrowUpRight size={14} />
-              </button>
+
+              <div className="flex items-center gap-8">
+                <div className="flex bg-slate-50/80 p-0.5 rounded-xl border border-slate-100 shadow-inner backdrop-blur-sm">
+                  <button
+                    onClick={() => setSortBy('priority')}
+                    className={clsx(
+                      "px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                      sortBy === 'priority' ? "bg-[#0F172A] text-white shadow-lg shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-white"
+                    )}
+                  >
+                    <Zap size={12} /> Priority
+                  </button>
+                  <button
+                    onClick={() => setSortBy('due')}
+                    className={clsx(
+                      "px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                      sortBy === 'due' ? "bg-[#0F172A] text-white shadow-lg shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-white"
+                    )}
+                  >
+                    <Clock size={12} /> Due Date
+                  </button>
+                  <button
+                    onClick={() => setSortBy('intake')}
+                    className={clsx(
+                      "px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                      sortBy === 'intake' ? "bg-[#0F172A] text-white shadow-lg shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-white"
+                    )}
+                  >
+                    <Calendar size={12} /> Intake
+                  </button>
+                </div>
+
+                <div className="h-8 w-px bg-slate-100"></div>
+
+                <button onClick={() => onNavigateToFilter('All')} className="text-xs font-black text-slate-400 hover:text-slate-900 transition-colors uppercase tracking-widest flex items-center gap-2 group">
+                  Full Repository <ArrowUpRight size={14} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                </button>
+              </div>
             </div>
-            
+
             <div className="p-6 space-y-4">
               {prioritizedBids.length > 0 ? prioritizedBids.map((bid) => {
                 const stageColor = STAGE_COLORS[bid.currentStage] || { bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-100' };
@@ -227,7 +319,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
               {auditTrail.map((act) => (
                 <div key={act.id} className="flex gap-4">
                   <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-black text-[10px] text-slate-500 shrink-0 uppercase">{act.userName.split(' ').map(n => n[0]).join('')}</div>
-                  <div className="min-w-0 flex-1"><p className="text-[11px] text-slate-600 leading-snug"><span className="font-black text-slate-900">{act.userName}</span><span className="text-[9px] text-[#D32F2F] font-bold mx-1 uppercase">[{getRoleDisplayName(act.userRole as any)}]</span> {act.action} <span className="font-black text-slate-900">{act.target}</span></p><p className="text-[9px] text-slate-400 font-bold mt-0.5">{act.subText}</p><p className="text-[9px] text-slate-400 mt-2 font-bold uppercase tracking-widest">{act.timestamp}</p></div>
+                  <div className="min-w-0 flex-1"><p className="text-[11px] text-slate-600 leading-snug"><span className="font-black text-slate-900">{act.userName}</span><span className="text-[9px] text-[#D32F2F] font-bold mx-1 uppercase">[{act.userRoleName || getRoleDisplayName(act.userRole as any)}]</span> {act.action} <span className="font-black text-slate-900">{act.target}</span></p><p className="text-[9px] text-slate-400 font-bold mt-0.5">{act.subText}</p><p className="text-[9px] text-slate-400 mt-2 font-bold uppercase tracking-widest">{act.timestamp}</p></div>
                   <div className="shrink-0">{getModalityIcon(act.modality)}</div>
                 </div>
               ))}
