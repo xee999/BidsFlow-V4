@@ -26,6 +26,12 @@ export const bidApi = {
         if (!res.ok) throw new Error('Failed to update bid');
         return res.json();
     },
+    remove: async (id: string): Promise<void> => {
+        const res = await fetch(`${API_BASE}/bids/${id}`, {
+            method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Failed to delete bid');
+    },
 };
 
 export const vaultApi = {

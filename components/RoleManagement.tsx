@@ -32,7 +32,7 @@ const SECTION_GROUPS = [
     {
         title: 'Administration',
         icon: <SettingsIcon size={14} className="text-slate-500" />,
-        sections: ['settings'] as AppSection[]
+        sections: ['settings', 'delete-manager'] as AppSection[]
     }
 ];
 
@@ -70,6 +70,7 @@ const RoleManagement: React.FC = () => {
             'reports': 'none',
             'risk-watch': 'none',
             'settings': 'none',
+            'delete-manager': 'none',
         }
     });
 
@@ -105,6 +106,7 @@ const RoleManagement: React.FC = () => {
                 'reports': 'none',
                 'risk-watch': 'none',
                 'settings': 'none',
+                'delete-manager': 'none',
             }
         });
         setIsAddingNew(true);

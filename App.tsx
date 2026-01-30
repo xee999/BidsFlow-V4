@@ -14,6 +14,7 @@ import Settings from './components/Settings.tsx';
 import ActivityLogView from './components/ActivityLogView.tsx';
 import UserManagementPanel from './components/UserManagementPanel.tsx';
 import Login from './components/Login.tsx';
+import DeleteBidsView from './components/DeleteBidsView.tsx';
 import { BidRecord, BidStatus, BidStage, RiskLevel, User, ActivityLog, TechnicalDocument } from './types.ts';
 import { NAV_ITEMS, SOLUTION_OPTIONS } from './constants.tsx';
 import { Search, X, Calendar, Filter, Clock, Send, Trophy, ZapOff, Ban, Briefcase, ChevronDown, Zap, Loader2 } from 'lucide-react';
@@ -129,6 +130,14 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteBid = (deletedId: string) => {
+    setBids(prev => prev.filter(b => b.id !== deletedId));
+    if (currentUser) {
+      const log = auditActions.bidUpdated(currentUser.name, currentUser.role, deletedId, 'Permanently Deleted');
+      addAuditLog(log);
+    }
+  };
+
   const handleSetVaultAssets = async (assets: TechnicalDocument[]) => {
     setVaultAssets(assets);
     if (assets.length > vaultAssets.length && currentUser) {
@@ -228,7 +237,11 @@ const App: React.FC = () => {
               )}
 
               {activeTab === 'all-bids' && (
-                <AllBids bids={bids} onViewBid={setViewingBidId} initialStatus={initialStatusFilter} />
+                <AllBids
+                  bids={bids}
+                  onViewBid={setViewingBidId}
+                  initialStatus={initialStatusFilter}
+                />
               )}
 
               {activeTab === 'studio' && (
@@ -260,6 +273,12 @@ const App: React.FC = () => {
                 <PermissionGuard section="approvals" requiredLevel="view">
                   <ApprovalsView bids={bids} onViewBid={setViewingBidId} />
                 </PermissionGuard>
+              )}
+              {activeTab === 'delete-manager' && (
+                <>
+                  {console.log('Rendering DeleteBidsView directly (Guard Bypassed)')}
+                  <DeleteBidsView bids={bids} onDeleteSuccess={handleDeleteBid} />
+                </>
               )}
               {activeTab === 'user-management' && currentUser?.role === 'SUPER_ADMIN' && <UserManagementPanel />}
               {activeTab === 'settings' && currentUser && (

@@ -32,7 +32,9 @@ export const PermissionProvider: React.FC<PermissionProviderProps> = ({
     children
 }) => {
     // Use custom permissions if provided, otherwise fall back to built-in role defaults
-    const permissions = customPermissions || DEFAULT_ROLE_PERMISSIONS[role] || DEFAULT_ROLE_PERMISSIONS.VIEWER;
+    // Merge custom permissions with defaults to ensure new keys are present even if custom permissions are outdated
+    const defaults = DEFAULT_ROLE_PERMISSIONS[role] || DEFAULT_ROLE_PERMISSIONS.VIEWER;
+    const permissions = customPermissions ? { ...defaults, ...customPermissions } : defaults;
 
     const canView = (section: AppSection): boolean => {
         const level = permissions[section];

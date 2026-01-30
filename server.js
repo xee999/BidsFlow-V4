@@ -183,7 +183,7 @@ app.delete('/api/bids/:id', checkDbConnection, async (req, res) => {
     try {
         const bid = await Bid.findOneAndDelete({ id: req.params.id });
         if (!bid) return res.status(404).json({ error: 'Bid not found' });
-        res.json({ message: 'Bid deleted' });
+        res.json({ message: 'Bid permanently deleted' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

@@ -65,6 +65,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isCollapsed,
             'risk-watch': 'risk-watch',
             'settings': 'settings',
             'activity-log': 'settings', // Activity log requires settings access
+            'delete-manager': 'delete-manager',
             'user-management': null, // Custom handling below
           };
 

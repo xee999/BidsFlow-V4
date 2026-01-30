@@ -14,6 +14,7 @@ interface BidIntakeProps {
 
 const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -183,6 +184,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
 
   const handleInitiate = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     const newErrors: Record<string, boolean> = {};
 
     // Strict Mandatory Validation Logic (All except Estimated Value)
@@ -207,6 +209,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
       return;
     }
 
+    setIsSubmitting(true);
     const newBid: BidRecord = {
       id: 'bid-' + Math.random().toString(36).substr(2, 9),
       customerName: formData.customerName!,
@@ -572,9 +575,21 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
           <div className="pt-8 mt-auto border-t border-slate-200 space-y-4">
             <button
               type="submit"
-              className="w-full bg-[#D32F2F] text-white py-4 rounded-xl font-black uppercase tracking-widest text-xs shadow-2xl hover:bg-[#B71C1C] transition-all transform active:scale-95 flex items-center justify-center gap-2"
+              disabled={isSubmitting}
+              className={clsx(
+                "w-full py-4 rounded-xl font-black uppercase tracking-widest text-xs shadow-2xl transition-all transform flex items-center justify-center gap-2",
+                isSubmitting ? "bg-slate-300 text-slate-500 cursor-not-allowed" : "bg-[#D32F2F] text-white hover:bg-[#B71C1C] active:scale-95"
+              )}
             >
-              Initiate Bid <ChevronDown className="-rotate-90" size={14} />
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="animate-spin" size={16} /> Processing...
+                </>
+              ) : (
+                <>
+                  Initiate Bid <ChevronDown className="-rotate-90" size={14} />
+                </>
+              )}
             </button>
             <p className="text-[8px] font-black text-center text-slate-400 uppercase tracking-widest">*All fields mandatory for governance compliance</p>
           </div>

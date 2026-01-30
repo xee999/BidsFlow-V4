@@ -12,7 +12,8 @@ import {
   Search,
   Layers,
   Sparkles,
-  Users
+  Users,
+  Trash2
 } from 'lucide-react';
 
 export const COLORS = {
@@ -45,6 +46,7 @@ export const NAV_ITEMS = [
   { id: 'approvals', label: 'Approvals', icon: <CheckCircle2 size={20} /> },
   { id: 'reports', label: 'Reports', icon: <BarChart3 size={20} /> },
   { id: 'risk-watch', label: 'Risk Watch', icon: <AlertTriangle size={20} /> },
+  { id: 'delete-manager', label: 'Delete Bids', icon: <Trash2 size={20} /> },
   { id: 'user-management', label: 'User Management', icon: <Users size={20} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={20} /> }
 ];

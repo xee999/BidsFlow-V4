@@ -219,6 +219,16 @@ export const auditActions = {
             bidId,
             projectName,
         }),
+    bidUpdated: (userName: string, userRole: UserRole, projectName: string, changeDetails: string): ActivityLog =>
+        createAuditLog({
+            userName,
+            userRole,
+            action: 'Updated Bid',
+            target: projectName,
+            subText: changeDetails,
+            changeType: 'edit',
+            projectName,
+        }),
 };
 
 // LocalStorage key for audit logs

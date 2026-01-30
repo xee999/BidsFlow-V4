@@ -1,19 +1,19 @@
 
 import React, { useState, useMemo } from 'react';
-import { Search, Calendar, Filter, Clock, Send, Trophy, ZapOff, Ban, Briefcase, ChevronDown, Zap } from 'lucide-react';
+import { Search, Trash2, AlertCircle, Building2, Calendar, ShieldAlert, Filter, Clock, Send, Trophy, ZapOff, Ban, ChevronDown, Briefcase, Zap } from 'lucide-react';
 import { BidRecord, BidStatus, BidStage } from '../types.ts';
 import { SOLUTION_OPTIONS } from '../constants.tsx';
 import { clsx } from 'clsx';
+import { bidApi } from '../services/api.ts';
 
-interface AllBidsProps {
+interface DeleteBidsViewProps {
     bids: BidRecord[];
-    onViewBid: (id: string) => void;
-    initialStatus?: string;
+    onDeleteSuccess: (id: string) => void;
 }
 
-const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All' }) => {
+const DeleteBidsView: React.FC<DeleteBidsViewProps> = ({ bids, onDeleteSuccess }) => {
     const [searchQuery, setSearchQuery] = useState('');
-    const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
+    const [statusFilter, setStatusFilter] = useState<string>('All');
     const [quickHorizon, setQuickHorizon] = useState<string>('All');
     const [phaseFilter, setPhaseFilter] = useState<string>('All');
     const [solutionFilter, setSolutionFilter] = useState<string>('All');
@@ -21,40 +21,77 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
     const [endDate, setEndDate] = useState<string>('');
     const [dateType, setDateType] = useState<string>('received');
 
-    const filteredBids = useMemo(() => {
-        return bids.filter(bid => {
-            // Search Filter
-            const matchesSearch = !searchQuery ||
-                bid.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                bid.customerName.toLowerCase().includes(searchQuery.toLowerCase());
+    const [isDeleting, setIsDeleting] = useState<string | null>(null);
+    const [showConfirm, setShowConfirm] = useState<string | null>(null);
 
-            // Status Filter
+    const filteredBids = useMemo(() => {
+        if (!bids) return [];
+
+        return bids.filter(bid => {
+            // 1. Search Filter
+            const query = searchQuery.toLowerCase().trim();
+            const matchesSearch = !query ||
+                (bid.projectName && bid.projectName.toLowerCase().includes(query)) ||
+                (bid.customerName && bid.customerName.toLowerCase().includes(query)) ||
+                (bid.id && bid.id.toLowerCase().includes(query));
+
+            // 2. Status Filter
             const matchesStatus = statusFilter === 'All' || bid.status === statusFilter;
 
-            // Phase Filter
+            // 3. Phase Filter
             const matchesPhase = phaseFilter === 'All' || bid.currentStage === phaseFilter;
 
-            // Solution Filter
+            // 4. Solution Filter
             const matchesSolution = solutionFilter === 'All' || (bid.requiredSolutions && bid.requiredSolutions.includes(solutionFilter));
 
-            // Date Filtering Logic - Use local date parsing to avoid timezone shifts
+            // 5. Date Filtering Logic
             const parseLocalDate = (dateStr: string) => {
                 if (!dateStr) return null;
-                const [y, m, d] = dateStr.split('-').map(Number);
-                return new Date(y, m - 1, d);
+                // Normalize separators
+                const normalized = dateStr.replace(/\//g, '-');
+                const parts = normalized.split('-');
+
+                let y, m, d;
+                if (parts.length === 3) {
+                    // Check if first part is Year (4 digits)
+                    if (parts[0].length === 4) {
+                        [y, m, d] = parts.map(Number);
+                    } else {
+                        // Assume DD-MM-YYYY
+                        [d, m, y] = parts.map(Number);
+                    }
+                    if (y && m && d) return new Date(y, m - 1, d);
+                }
+
+                // Fallback to standard Date parse
+                const parsed = new Date(dateStr);
+                return isNaN(parsed.getTime()) ? null : parsed;
             };
 
-            // Determine which date to filter by
             let targetDateStr = bid.receivedDate;
             if (dateType === 'deadline') targetDateStr = bid.deadline;
             if (dateType === 'published') targetDateStr = bid.publishDate || '';
 
             const bidDate = parseLocalDate(targetDateStr);
 
+            // Debug Log (only first bid)
+            if (bids.length > 0 && bid === bids[0]) {
+                console.log('DEBUG FILTER:', {
+                    id: bid.id,
+                    targetDateStr,
+                    bidDate,
+                    dateType,
+                    quickHorizon,
+                    startDate,
+                    endDate,
+                    matchesHorizon: true, // simplified assumption for log
+                });
+            }
+
             const now = new Date();
             const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-            // Quick Horizon Filter
+            // 6. Quick Horizon
             let matchesHorizon = true;
             if (bidDate) {
                 if (quickHorizon === 'This Week') {
@@ -66,10 +103,10 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                     matchesHorizon = bidDate >= startOfMonth;
                 }
             } else if (quickHorizon !== 'All') {
-                matchesHorizon = false; // Filter active but no date to check
+                matchesHorizon = false;
             }
 
-            // Custom Timeline Filter
+            // 7. Custom Range
             let matchesTimeline = true;
             if (startDate || endDate) {
                 if (!bidDate) {
@@ -91,6 +128,20 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
         });
     }, [bids, searchQuery, statusFilter, phaseFilter, solutionFilter, quickHorizon, startDate, endDate, dateType]);
 
+    const handleDelete = async (id: string) => {
+        setIsDeleting(id);
+        try {
+            await bidApi.remove(id);
+            onDeleteSuccess(id);
+            setShowConfirm(null);
+        } catch (err) {
+            console.error('Failed to delete bid:', err);
+            alert('Error: Could not delete the bid. Please try again.');
+        } finally {
+            setIsDeleting(null);
+        }
+    };
+
     const statusOptions = [
         { label: 'ALL', value: 'All', icon: <Filter size={18} />, color: 'bg-[#0F172A] text-white border-transparent' },
         { label: 'ACTIVE', value: BidStatus.ACTIVE, icon: <Clock size={18} />, color: 'bg-[#EFF6FF] text-[#2563EB] border-[#DBEAFE]' },
@@ -102,20 +153,23 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
 
     return (
         <div className="p-8 max-w-[1600px] mx-auto space-y-6 pb-20 text-left bg-[#F1F5F9]/30 min-h-screen">
-            {/* Header & Search Bar - High Contrast, Clean Minimalist Design */}
+            {/* Header & Search Bar */}
             <div className="flex justify-between items-end mb-10 px-2">
                 <div>
-                    <h1 className="text-4xl font-black text-[#0F172A] tracking-tighter mb-2 leading-none uppercase">Bid Repository</h1>
+                    <h1 className="text-4xl font-black text-[#0F172A] tracking-tighter mb-2 leading-none uppercase">
+                        Delete Manager
+                    </h1>
                     <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.2em] flex items-center gap-2">
-                        <span className="w-8 h-[2px] bg-slate-200"></span>
-                        Strategic Business Database
+                        <span className="w-8 h-[2px] bg-[#D32F2F]"></span>
+                        Permanent Excision Protocol
                     </p>
                 </div>
+
                 <div className="relative w-96">
                     <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                     <input
                         type="text"
-                        placeholder="SEARCH BIDS..."
+                        placeholder="SEARCH BIDS TO DELETE..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full bg-white border border-slate-100 rounded-2xl py-4 pl-14 pr-6 text-[11px] font-black uppercase tracking-widest shadow-[0_10px_30px_rgba(0,0,0,0.02)] focus:ring-2 focus:ring-[#D32F2F] focus:border-transparent outline-none transition-all placeholder:text-slate-200"
@@ -123,13 +177,27 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                 </div>
             </div>
 
-            {/* Comprehensive Filter Panel - High-Density UX Design */}
-            <div className="bg-white border border-slate-100 rounded-[2rem] p-6 lg:p-8 shadow-[0_15px_40px_rgba(0,0,0,0.02)] space-y-6">
+            {/* Warning Banner */}
+            <div className="bg-red-50 border border-red-100 rounded-[2rem] p-6 flex items-start gap-4">
+                <div className="bg-white p-3 rounded-2xl shadow-sm">
+                    <AlertCircle className="text-[#D32F2F]" size={24} />
+                </div>
+                <div>
+                    <h3 className="text-[#D32F2F] font-black text-sm uppercase tracking-wider mb-1">Safety Warning</h3>
+                    <p className="text-slate-500 text-xs font-bold leading-relaxed">
+                        Actions in this section are <span className="text-[#D32F2F] underline underline-offset-4">PERMANENT</span>.
+                        Deleting a tender will remove all associated documents, pricing data, and history from the main database.
+                        There is no "Undo" for these actions.
+                    </p>
+                </div>
+            </div>
 
-                {/* primary filters row - High Density Layout */}
+            {/* Filter Panel */}
+            <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-[0_15px_40px_rgba(0,0,0,0.02)] space-y-6">
+
+                {/* Primary Filters Row */}
                 <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
-
-                    {/* Status Filter - Tight Wrapping Box */}
+                    {/* Status Filter */}
                     <div className="space-y-3 min-w-0">
                         <label className="text-[9px] font-black text-[#94A3B8] uppercase tracking-[0.2em] ml-1">Current Status</label>
                         <div className="bg-[#F8FAFC] p-1 rounded-2xl border border-slate-50 flex flex-nowrap gap-1 w-fit">
@@ -151,7 +219,7 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                         </div>
                     </div>
 
-                    {/* Quick Horizon Filter - Compact Width */}
+                    {/* Quick Horizon */}
                     <div className="space-y-3 min-w-[240px]">
                         <label className="text-[9px] font-black text-[#94A3B8] uppercase tracking-[0.2em] ml-1">Quick Horizon</label>
                         <div className="bg-[#F8FAFC] p-1 rounded-2xl border border-slate-50 flex gap-1">
@@ -173,17 +241,16 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                     </div>
                 </div>
 
-                {/* secondary filters row - Dense Grid with Narrow Selects */}
+                {/* Secondary Filters Row */}
                 <div className="grid grid-cols-1 lg:grid-cols-1 xl:grid-cols-12 gap-6 pt-6 border-t border-slate-50 items-end">
 
-                    {/* Custom Timeline Area - Compact sizing */}
+                    {/* Custom Range */}
                     <div className="space-y-3 xl:col-span-5">
                         <div className="flex justify-between items-center">
                             <label className="text-[9px] font-black text-[#94A3B8] uppercase tracking-[0.2em] ml-1 flex items-center gap-2">
                                 <Clock size={12} className="text-slate-400" /> Custom Range
                             </label>
 
-                            {/* Date Type Selector */}
                             <div className="bg-[#F8FAFC] p-0.5 rounded-lg border border-slate-100 flex gap-0.5">
                                 {[
                                     { id: 'received', label: 'Intake' },
@@ -229,7 +296,7 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                         </div>
                     </div>
 
-                    {/* Phase Selector - Narrow Width component */}
+                    {/* Phase Selector */}
                     <div className="space-y-3 xl:col-span-3">
                         <label className="text-[9px] font-black text-[#94A3B8] uppercase tracking-[0.2em] ml-1 flex items-center gap-2">
                             <Briefcase size={12} className="text-slate-400" /> Phase
@@ -249,7 +316,7 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                         </div>
                     </div>
 
-                    {/* Solution Portfolio Selector - Narrow Width component */}
+                    {/* Solution Portfolio Selector */}
                     <div className="space-y-3 xl:col-span-4">
                         <label className="text-[9px] font-black text-[#94A3B8] uppercase tracking-[0.2em] ml-1 flex items-center gap-2">
                             <Zap size={12} className="text-slate-400" /> Solution portfolio
@@ -271,75 +338,108 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                 </div>
             </div>
 
-            {/* Results Grid - High-Fidelity Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 mt-16 px-1">
+            {/* List */}
+            <div className="space-y-4">
                 {filteredBids.map(bid => (
                     <div
-                        key={bid.id}
-                        onClick={() => onViewBid(bid.id)}
-                        className="bg-white p-10 rounded-[3.5rem] border border-slate-50 shadow-[0_4px_25px_rgba(0,0,0,0.015)] hover:shadow-[0_25px_60px_rgba(0,0,0,0.05)] hover:-translate-y-3 transition-all duration-500 cursor-pointer group flex flex-col h-full overflow-hidden relative"
+                        key={bid.id || Math.random().toString()}
+                        className="bg-white border border-slate-100 rounded-[2rem] p-6 flex items-center justify-between group hover:border-[#D32F2F]/20 hover:shadow-xl hover:shadow-red-900/5 transition-all duration-300"
                     >
-                        {/* Status Accent Strip */}
-                        <div className={clsx(
-                            "absolute top-0 left-0 w-full h-[6px] transition-all duration-500",
-                            bid.status === BidStatus.WON ? "bg-emerald-400 translate-y-[-2px] group-hover:translate-y-0" :
-                                bid.status === BidStatus.LOST ? "bg-slate-300 translate-y-[-2px] group-hover:translate-y-0" :
-                                    bid.status === BidStatus.ACTIVE ? "bg-blue-400 translate-y-[-2px] group-hover:translate-y-0" :
-                                        bid.status === BidStatus.SUBMITTED ? "bg-orange-400 translate-y-[-2px] group-hover:translate-y-0" :
-                                            "bg-slate-100"
-                        )} />
-
-                        <div className="flex justify-between items-start mb-10 mt-2">
-                            <span className={clsx(
-                                "px-5 h-8 flex items-center rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm border",
-                                bid.status === BidStatus.WON ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
-                                    bid.status === BidStatus.LOST ? "bg-slate-50 text-slate-500 border-slate-100" :
-                                        bid.status === BidStatus.ACTIVE ? "bg-blue-50 text-blue-600 border-blue-100" :
-                                            bid.status === BidStatus.SUBMITTED ? "bg-orange-50 text-orange-600 border-orange-100" :
-                                                "bg-slate-50 text-slate-400 border-slate-100"
-                            )}>
-                                {bid.status}
-                            </span>
-                            <div className="text-3xl font-black text-slate-900 tracking-tighter italic opacity-80 group-hover:opacity-100 transition-opacity">
-                                <span className="text-[12px] align-top mt-1 mr-1">{bid.currency}</span>
-                                {((bid.tcvExclTax || bid.estimatedValue) / 1000000).toFixed(1)}M
+                        <div className="flex items-center gap-6">
+                            <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 font-black text-xs uppercase group-hover:bg-red-50 group-hover:text-[#D32F2F] transition-colors">
+                                {(bid.customerName || '??').substring(0, 2)}
+                            </div>
+                            <div>
+                                <h4 className="text-[#0F172A] font-black text-base uppercase tracking-tight mb-1 group-hover:text-[#D32F2F] transition-colors">
+                                    {bid.projectName || 'Untitled Project'}
+                                </h4>
+                                <div className="flex items-center gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                    <span className={clsx(
+                                        "px-2 py-0.5 rounded-md border text-[9px] flex items-center gap-1",
+                                        bid.status === BidStatus.WON ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                                            bid.status === BidStatus.LOST ? "bg-slate-50 text-slate-500 border-slate-100" :
+                                                "bg-blue-50 text-blue-600 border-blue-100"
+                                    )}>
+                                        {bid.status}
+                                    </span>
+                                    <span className="flex items-center gap-1.5">
+                                        <Building2 size={12} /> {bid.customerName || 'Unknown Customer'}
+                                    </span>
+                                    <span className="flex items-center gap-1.5">
+                                        <Calendar size={12} /> {bid.deadline || 'No Date'}
+                                    </span>
+                                    <span className="text-slate-200 opacity-50">ID: {bid.id || 'N/A'}</span>
+                                </div>
                             </div>
                         </div>
 
-                        <h3 className="text-2xl font-black text-[#0F172A] group-hover:text-[#D32F2F] transition-colors line-clamp-2 leading-[1.05] uppercase tracking-tighter mb-4 pr-4">
-                            {bid.projectName}
-                        </h3>
-                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest relative">
-                            {bid.customerName}
-                            <span className="block w-12 h-1 bg-slate-100 mt-4 group-hover:w-20 group-hover:bg-[#D32F2F] transition-all duration-500"></span>
-                        </p>
-
-                        <div className="mt-auto pt-10 flex items-center justify-between text-[11px] font-black text-slate-400 uppercase tracking-widest">
-                            <div className="flex items-center gap-2 group-hover:text-slate-600 transition-colors">
-                                <Calendar size={14} className="text-[#D32F2F]/60 group-hover:text-[#D32F2F]" />
-                                {bid.deadline}
-                            </div>
-                            <div className="flex items-center gap-2 bg-slate-50 px-4 py-2 rounded-xl group-hover:bg-[#1E3A5F]/5 transition-colors">
-                                <Briefcase size={14} className="text-[#1E3A5F]" />
-                                {bid.currentStage}
-                            </div>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={() => bid.id && setShowConfirm(bid.id)}
+                                className="bg-white border border-slate-100 text-slate-400 hover:text-[#D32F2F] hover:bg-red-50 hover:border-red-100 p-4 rounded-xl transition-all duration-300 shadow-sm"
+                                title="Initiate Deletion"
+                            >
+                                <Trash2 size={20} />
+                            </button>
                         </div>
                     </div>
                 ))}
 
-                {/* Empty State Redesign */}
                 {filteredBids.length === 0 && (
-                    <div className="col-span-full py-32 text-center bg-white rounded-[4rem] border border-dashed border-slate-200">
-                        <div className="bg-slate-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-8 shadow-inner">
-                            <Search className="text-slate-300" size={40} />
-                        </div>
-                        <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">No strategic matches</h3>
-                        <p className="text-slate-400 font-bold text-xs uppercase tracking-widest mt-4">Expand your selection parameters or search criteria</p>
+                    <div className="py-20 text-center bg-white rounded-[3rem] border border-dashed border-slate-200">
+                        <ShieldAlert className="text-slate-200 mx-auto mb-4" size={48} />
+                        <h3 className="text-slate-900 font-black uppercase tracking-tight">No Bids Found</h3>
+                        <p className="text-slate-400 text-xs font-bold mt-2">Try searching by Project Name or Customer</p>
                     </div>
                 )}
             </div>
-        </div>
+
+            {/* Confirmation Modal */}
+            {
+                showConfirm && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-white rounded-[2rem] p-8 max-w-md w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
+                            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <Trash2 className="text-[#D32F2F]" size={32} />
+                            </div>
+
+                            <h3 className="text-2xl font-black text-slate-900 text-center uppercase tracking-tight mb-2">
+                                Confirm Deletion
+                            </h3>
+
+                            <p className="text-center text-slate-500 font-medium text-sm mb-8 leading-relaxed">
+                                Are you sure you want to permanently delete this bid?
+                                <br />
+                                <span className="text-[#D32F2F] font-bold">This action cannot be undone.</span>
+                            </p>
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setShowConfirm(null)}
+                                    className="flex-1 bg-slate-100 text-slate-600 px-4 py-4 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => showConfirm && handleDelete(showConfirm)}
+                                    disabled={!!isDeleting}
+                                    className="flex-1 bg-[#D32F2F] text-white px-4 py-4 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-700 shadow-lg shadow-red-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {isDeleting ? (
+                                        <>Processing...</>
+                                    ) : (
+                                        <>
+                                            <Trash2 size={16} /> Delete Forever
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+        </div >
     );
 };
 
-export default AllBids;
+export default DeleteBidsView;

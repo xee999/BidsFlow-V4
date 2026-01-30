@@ -297,7 +297,8 @@ export type AppSection =
   | 'approvals'
   | 'reports'
   | 'risk-watch'
-  | 'settings';
+  | 'settings'
+  | 'delete-manager';
 
 // All available sections (for iteration)
 export const APP_SECTIONS: { id: AppSection; label: string }[] = [
@@ -310,6 +311,7 @@ export const APP_SECTIONS: { id: AppSection; label: string }[] = [
   { id: 'reports', label: 'Reports' },
   { id: 'risk-watch', label: 'Risk Watch' },
   { id: 'settings', label: 'Settings' },
+  { id: 'delete-manager', label: 'Delete Manager' },
 ];
 
 // Permission levels per section
@@ -341,6 +343,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
     'reports': 'edit',
     'risk-watch': 'edit',
     'settings': 'edit',
+    'delete-manager': 'edit',
   },
   BID_TEAM: {
     'bid-intake': 'edit',
@@ -352,6 +355,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
     'reports': 'view',
     'risk-watch': 'view',
     'settings': 'none',
+    'delete-manager': 'none',
   },
   VIEWER: {
     'bid-intake': 'none',
@@ -363,6 +367,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
     'reports': 'view',
     'risk-watch': 'view',
     'settings': 'none',
+    'delete-manager': 'none',
   },
 };
 
