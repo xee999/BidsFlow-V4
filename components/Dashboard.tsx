@@ -147,8 +147,8 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
     const noBidsThisMonth = bids.filter(b => b.status === BidStatus.NO_BID && isCurrentMonth(b.receivedDate));
     const winsThisMonth = bids.filter(b => b.status === BidStatus.WON && isCurrentMonth(b.submissionDate || b.deadline));
     const submittedMonth = bids.filter(b => b.status === BidStatus.SUBMITTED && isCurrentMonth(b.submissionDate));
-    const submittedValueMonth = submittedMonth.reduce((acc, b) => acc + (b.estimatedValue || 0), 0);
-    return { activeCount: active.length, highRiskCount: highRiskActive.length, noBidCount: noBidsThisMonth.length, winsMonthCount: winsThisMonth.length, submittedValueMonth };
+    const activeValue = active.reduce((acc, b) => acc + (b.estimatedValue || 0), 0);
+    return { activeCount: active.length, highRiskCount: highRiskActive.length, noBidCount: noBidsThisMonth.length, winsMonthCount: winsThisMonth.length, activeValue };
   }, [bids]);
 
   const deadlines = [...prioritizedBids].sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime()).slice(0, 4);
@@ -197,7 +197,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
         <Scorecard label="High Risk Bids" value={stats.highRiskCount} sub="REQUIRING ACTION" icon={<AlertCircle size={20} className="text-red-500" />} color="red" pulse={stats.highRiskCount > 0} onClick={() => onNavigateToFilter('Active')} />
         <Scorecard label={`No Bids (${currentMonthName})`} value={stats.noBidCount} sub="STRATEGIC REJECTION" icon={<Ban size={20} className="text-slate-500" />} color="slate" onClick={() => onNavigateToFilter('No Bid')} />
         <Scorecard label={`Wins (${currentMonthName})`} value={stats.winsMonthCount} sub="TARGET ACHIEVED" icon={<Target size={20} className="text-emerald-500" />} color="emerald" onClick={() => onNavigateToFilter('Won')} />
-        <Scorecard label={`${currentMonthName} Value`} value={`PKR ${(stats.submittedValueMonth / 1000000).toFixed(0)}M`} sub="SUBMITTED REVENUE" icon={<DollarSign size={20} className="text-amber-500" />} color="amber" onClick={() => onNavigateToFilter('Submitted')} />
+        <Scorecard label="Total Active Value" value={`PKR ${(stats.activeValue / 1000000).toFixed(0)}M`} sub="ESTIMATED REVENUE" icon={<DollarSign size={20} className="text-amber-500" />} color="amber" onClick={() => onNavigateToFilter('Active')} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
