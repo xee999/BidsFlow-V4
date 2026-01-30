@@ -144,7 +144,12 @@ MANDATORY DATA FIELDS:
 - Bid Security: Extract amount or %.
 - Pre-Bid Meeting: MANDATORY. Extract Date, Time, Location, and if it's Mandatory.
 - Deliverables Summary: Extract Name, Quantity, AND Key Technical Specifications for each.
-- Required Solutions: Match from: Quantica, GSM Data, M2M (Devices Only), IoT, IT Devices (Laptop/Desktop), Mobile Devices (Phone or Tablet), CPaaS, Cloud Solutions, Fixed Connectivity, System Integration.
+- Required Solutions: Match from: Quantica, GSM Data, M2M (Devices Only), IoT, IT Devices (Laptop/Desktop), Mobile Devices (Phone or Tablet), CPaaS, Cloud & IT, Managed Services, Fixed Connectivity, System Integration.
+- SOLUTION CLASSIFICATION MAPPING (Strictly Categorize into "Required Solutions"):
+  1. Cloud & IT: Use for Productivity Suite (ITSM, M365, Dynamics, Azure, AWS), Hardware Reselling (Servers, NGFW, Storage, Network), Colocation Datacenters, IaaS/BC, DevOps (Kubernetes, CI/CD, Monitoring).
+  2. Managed Services: Use for Network Security (DNS, NGFW as Service, DDoS, WAF), Endpoint Security (EDR/XDR, Patch Mgmt), IAM (PAM, MFA), MSSP (Monitoring, SIEM/SOAR, VAPT, Compromised Assessment), DBaaS.
+  3. System Integration (SI): Use for Business Applications (RPA/Agentic, ESM, App Managed Services, Big Data, ERP/CRM), Communication Solutions (Contact Center), Network Solutions (SDWAN, Firewall Mgmt), Infrastructure Solutions (Private Cloud, HCI).
+  4. Other: Map others based on name (e.g., IoT to IoT).
 - Publish Date: Tender release date.
 - Complexity: Assessment based on (>50M PKR = High, 25-50M = Medium, <25M = Low), also consider: multi-vendor coordination, physical surveys needed, complex document sourcing, higher approval authority.
 - Scope of Work & Project Brief: Provide comprehensive summaries.`;

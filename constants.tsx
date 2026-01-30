@@ -30,7 +30,8 @@ export const SOLUTION_OPTIONS = [
   'IT Devices (Laptop/Desktop)',
   'Mobile Devices (Phone or Tablet)',
   'CPaaS',
-  'Cloud Solutions',
+  'Cloud & IT',
+  'Managed Services',
   'Fixed Connectivity',
   'System Integration'
 ];

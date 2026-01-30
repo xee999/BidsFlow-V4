@@ -28,7 +28,17 @@ router.post('/login', async (req, res) => {
         const { email, password } = req.body;
         const user = await User.findOne({ email });
 
-        if (!user || !(await user.comparePassword(password))) {
+        if (!user) {
+            console.log(`Login failed: User not found for email ${email}`);
+            return res.status(401).json({ error: 'Invalid email or password' });
+        }
+
+        if (!user.password) {
+            console.error(`CRITICAL: User document for ${email} is missing the password field! Keys found:`, Object.keys(user.toObject ? user.toObject() : user));
+            return res.status(500).json({ error: 'System error: User account configuration issue' });
+        }
+
+        if (!(await user.comparePassword(password))) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 

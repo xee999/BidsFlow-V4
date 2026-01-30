@@ -35,8 +35,10 @@ const SOLUTION_COLORS: Record<string, { bg: string, text: string, border: string
   'IT Devices (Laptop/Desktop)': { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200' },
   'Mobile Devices (Phone or Tablet)': { bg: 'bg-pink-100', text: 'text-pink-700', border: 'border-pink-200' },
   'CPaaS': { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-200' },
-  'Cloud Solutions': { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-200' },
-  'Fixed Connectivity': { bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200' }
+  'Cloud & IT': { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-200' },
+  'Managed Services': { bg: 'bg-violet-100', text: 'text-violet-700', border: 'border-violet-200' },
+  'Fixed Connectivity': { bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200' },
+  'System Integration': { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200' }
 };
 
 const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid, onViewBid, onNavigateToFilter }) => {

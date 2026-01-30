@@ -65,6 +65,14 @@ async function createDefaultAdmin() {
         }
 
         const adminExists = await User.findOne({ role: 'SUPER_ADMIN' });
+
+        // If an admin exists but is missing a password (corrupted state), fix it
+        if (adminExists && !adminExists.password) {
+            console.log('Fixing corrupted admin user: missing password');
+            adminExists.password = 'Smart@4ever';
+            await adminExists.save();
+        }
+
         if (!adminExists) {
             const defaultAdmin = new User({
                 id: `user-${crypto.randomUUID()}`,
@@ -76,6 +84,14 @@ async function createDefaultAdmin() {
             });
             await defaultAdmin.save();
             console.log('Default admin user created: admin@bidsflow.com / Smart@4ever');
+        } else {
+            // Also ensure the specific admin@bidsflow.com exists or has a password
+            const specificAdmin = await User.findOne({ email: 'admin@bidsflow.com' });
+            if (specificAdmin && !specificAdmin.password) {
+                console.log('Fixing specifically admin@bidsflow.com: missing password');
+                specificAdmin.password = 'Smart@4ever';
+                await specificAdmin.save();
+            }
         }
     } catch (err) {
         console.error('Error creating default admin:', err);

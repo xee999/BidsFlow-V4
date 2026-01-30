@@ -23,6 +23,7 @@ COPY --from=build /app/dist ./dist
 COPY server.js .
 COPY models/*.js ./models/
 COPY middleware/*.js ./middleware/
+COPY routes/*.js ./routes/
 
 EXPOSE 3000
 
