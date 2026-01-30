@@ -2,7 +2,17 @@ import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import dotenv from 'dotenv';
 dotenv.config();
 
-const genAI = new GoogleGenerativeAI(process.env.API_KEY || process.env.GEMINI_API_KEY);
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
+
+if (!GEMINI_API_KEY) {
+    if (process.env.NODE_ENV === 'production') {
+        console.error("FATAL: GEMINI_API_KEY is missing.");
+    } else {
+        console.warn("WARNING: GEMINI_API_KEY is missing. AI features will fail.");
+    }
+}
+
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 const PRIMARY_MODEL = 'gemini-2.5-pro';
 const FALLBACK_MODEL = 'gemini-2.5-flash';

@@ -18,6 +18,11 @@ import { analyzePricingDocument, analyzeComplianceDocuments, generateFinalRiskAs
 import FloatingAIChat from './FloatingAIChat.tsx';
 import { clsx } from 'clsx';
 import { auditActions } from '../services/auditService.ts';
+import BidLifecycleSidebar from './bid-lifecycle/BidLifecycleSidebar';
+import BidLifecycleHeader from './bid-lifecycle/BidLifecycleHeader';
+import NoBidModal from './bid-lifecycle/NoBidModal';
+import OutcomeModal from './bid-lifecycle/OutcomeModal';
+import DeleteAssetModal from './bid-lifecycle/DeleteAssetModal';
 
 interface BidLifecycleProps {
   bid: BidRecord;
@@ -27,17 +32,6 @@ interface BidLifecycleProps {
   addAuditLog?: (log: ActivityLog) => void;
   currentUser?: User;
 }
-
-const COMMON_NO_BID_REASONS = [
-  'Technical Non-Compliance',
-  'Budget/Pricing Mismatch',
-  'High Delivery Risk',
-  'Resource Unavailability',
-  'Conflict of Interest',
-  'Unfavorable T&Cs',
-  'Strategic Realignment',
-  'Missing Credentials'
-];
 
 // Phase weights by complexity (total = 100%)
 // Compliance reduced per team feedback: High=1.5d, Medium=1d, Low=0.5d (on ~20d bid)
@@ -346,7 +340,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
         for (const [filename, fileObj] of zipEntries) {
           const base64 = await fileObj.async('base64');
           extractedDocs.push({
-            id: 'asset-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+            id: 'asset-' + crypto.randomUUID(),
             name: filename.split('/').pop() || filename,
             type: 'PDF',
             category: category as any,
@@ -738,115 +732,25 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
           accept={key === 'bidSecurity' ? ".pdf,image/png,image/jpeg" : ".pdf,.zip"}
         />
       ))}
-      <aside className={clsx("bg-[#1E3A5F] text-white transition-all duration-300 flex flex-col relative z-30 shadow-2xl shrink-0", sidebarCollapsed ? "w-16" : "w-80")}>
-        <button
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="absolute -right-3 top-24 w-6 h-6 bg-[#D32F2F] text-white rounded-full shadow-md flex items-center justify-center border border-white/20 z-40 hover:scale-110 transition-transform cursor-pointer"
-        >
-          {sidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-        </button>
-        <div className="p-6 border-b border-white/10 flex items-center gap-4">
-          <div className="w-10 h-10 bg-[#D32F2F] rounded-xl flex items-center justify-center text-white shrink-0 shadow-lg"><Briefcase size={20} /></div>
-          {!sidebarCollapsed && <div className="min-w-0"><h2 className="text-sm font-black uppercase tracking-tight truncate">{bid.projectName}</h2><p className="text-[10px] text-slate-400 font-bold truncate">{bid.customerName}</p></div>}
-        </div>
-        {!sidebarCollapsed && (
-          <div className="flex-1 overflow-y-auto p-6 space-y-8 scrollbar-hide">
-            <div>
-              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Target size={14} className="text-red-400" /> Current Bid Status</h4>
-              <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-center justify-between">
-                <div><p className="text-[9px] font-black text-red-200 uppercase tracking-widest">Official Phase</p><p className="text-sm font-black text-white">{bid.currentStage}</p></div>
-                <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center animate-pulse"><Activity size={14} /></div>
-              </div>
-            </div>
-
-            <div>
-              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Strategic Brief</h4>
-              <div className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
-                {/* Scrollable Strategic Brief without changing card size */}
-                <div className="max-h-[88px] overflow-y-auto scrollbar-hide pr-1 outline-none">
-                  <p className="text-[11px] text-slate-300 leading-relaxed font-medium">
-                    {bid.summaryRequirements || 'No summary.'}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-1.5">{(bid.requiredSolutions || []).map(s => <span key={s} className="px-2 py-0.5 bg-red-500/20 text-red-200 text-[8px] font-black uppercase rounded border border-red-500/30">{s}</span>)}</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center text-center">
-                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Days Left</p>
-                <div className={clsx(
-                  "text-2xl font-black mb-1 transition-all",
-                  remainingDays <= 3 ? "text-red-500 animate-pulse scale-110" : remainingDays <= 7 ? "text-amber-400" : "text-white"
-                )}>
-                  {remainingDays}
-                </div>
-                <p className="text-[8px] font-bold text-slate-500 uppercase">{bid.deadline}</p>
-              </div>
-              <StatBox label={bid.tcvExclTax ? "Bid Value" : "Est. Value"} value={`PKR ${((bid.tcvExclTax || bid.estimatedValue) / 1000000).toFixed(1)}M`} color="text-white" />
-            </div>
-
-            <div className="pt-4 mt-auto">
-              <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
-                <p className="text-[9px] font-black text-slate-500 uppercase mb-1">JBC Manager</p>
-                <p className="text-xs font-black text-slate-200">{bid.jbcName}</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </aside>
+      <BidLifecycleSidebar
+        bid={bid}
+        remainingDays={remainingDays}
+        sidebarCollapsed={sidebarCollapsed}
+        setSidebarCollapsed={setSidebarCollapsed}
+      />
 
       <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-        <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between shadow-sm z-20 shrink-0">
-          <div className="flex items-center gap-6 overflow-hidden">
-            <button
-              onClick={onClose}
-              className="w-10 h-10 bg-[#D32F2F] text-white flex items-center justify-center rounded-full transition-all hover:bg-red-700 shadow-md active:scale-90 shrink-0"
-              title="Return to Repository"
-            >
-              <ArrowLeft size={20} />
-            </button>
-            <div className="h-8 w-px bg-slate-100 shrink-0"></div>
-            <nav ref={navRef} className="flex items-center gap-1 overflow-x-auto no-scrollbar max-w-2xl shrink-0">
-              {stagesOrder.map((stage, idx) => {
-                const isViewing = viewingStage === stage;
-                const isDone = currentOfficialIndex > idx;
-                return (
-                  <button
-                    key={stage}
-                    onClick={() => setViewingStage(stage)}
-                    className={clsx(
-                      "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider whitespace-nowrap transition-all flex items-center gap-2 group relative",
-                      isViewing ? "bg-[#1E3A5F] text-white shadow-lg active-stage-btn" : isDone ? "text-emerald-600 bg-emerald-50" : "text-slate-400 hover:text-slate-600"
-                    )}
-                  >
-                    {isDone ? <CheckCircle2 size={12} /> : STAGE_ICONS[stage]} {stage}
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-
-          <div className="flex items-center gap-4 shrink-0">
-            {viewingStage === bid.currentStage && viewingStage !== BidStage.FINAL_REVIEW && userRole !== 'VIEWER' && (
-              <button
-                onClick={handleProgressStage}
-                className="px-6 py-2.5 text-[10px] font-black text-white bg-emerald-600 rounded-xl uppercase tracking-widest shadow-lg shadow-emerald-100 hover:bg-emerald-700 active:scale-95 transition-all flex items-center gap-2"
-              >
-                Finish Phase <CheckCircle2 size={14} />
-              </button>
-            )}
-
-            {userRole !== 'VIEWER' && (
-              <button
-                onClick={() => setShowNoBidModal(true)}
-                className="flex items-center gap-2 px-6 py-2.5 text-[10px] font-black text-white bg-red-600 rounded-xl uppercase tracking-widest hover:bg-red-700 active:scale-95 transition-all shadow-lg shadow-red-100"
-              >
-                No-Bid <Flag size={14} />
-              </button>
-            )}
-          </div>
-        </header>
+        <BidLifecycleHeader
+          bid={bid}
+          viewingStage={viewingStage}
+          setViewingStage={setViewingStage}
+          onClose={onClose}
+          userRole={userRole}
+          handleProgressStage={handleProgressStage}
+          setShowNoBidModal={setShowNoBidModal}
+          stagesOrder={stagesOrder}
+          currentOfficialIndex={currentOfficialIndex}
+        />
 
         <div className="flex-1 overflow-y-auto p-8 space-y-10 scrollbar-hide pb-60 text-left">
           {/* Phase Header with Timing Badge */}
@@ -1359,7 +1263,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                       </button>
                     </div>
                     <div className="bg-white/5 border border-white/10 rounded-[1.5rem] p-8 min-h-[120px] max-h-[350px] overflow-y-auto scrollbar-hide text-left">
-                      {isAnalyzingSolution ? <div className="flex flex-col items-center justify-center py-10 gap-3"><Loader2 className="animate-spin text-[#FFC107]" size={24} /><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Checking alignment based on project scope...</p></div> : <SolutionAnalysisView analysis={bid.solutioningAIAnalysis} isLoading={isAnalyzingSolution} />}
+                      {isAnalyzingSolution ? <div className="flex flex-col items-center justify-center py-10 gap-3"><Loader2 className="animate-spin text-[#FFC107]" size={24} /><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Checking alignment based on project scope...</p></div> : <SolutionAnalysisView analysis={bid.solutioningAIAnalysis || null} isLoading={isAnalyzingSolution} />}
                     </div>
                   </div>
                 </div>
@@ -1524,74 +1428,27 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
       </main>
       <FloatingAIChat bid={bid} />
 
-      {
-        showNoBidModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left">
-            <div className="bg-white rounded-[3rem] w-full max-w-xl p-10 shadow-2xl animate-in zoom-in duration-300">
-              <div className="flex items-center gap-4 mb-8">
-                <div className="p-4 bg-red-50 text-red-500 rounded-3xl"><Flag size={32} /></div>
-                <div><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">No-Bid Record</h3><p className="text-sm font-medium text-slate-500">Provide reason for strategic rejection.</p></div>
-              </div>
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Category</label>
-                  <div className="relative group">
-                    <select value={noBidCategory} onChange={(e) => setNoBidCategory(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-bold outline-none appearance-none transition-all">
-                      <option value="" disabled>Select Reason...</option>
-                      {COMMON_NO_BID_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                    <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4 mt-10">
-                <button onClick={() => setShowNoBidModal(false)} className="py-4 rounded-2xl border border-slate-200 font-black text-slate-400 uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all">Cancel</button>
-                <button onClick={handleSetNoBid} className="py-4 rounded-2xl bg-red-600 text-white font-black uppercase text-[10px] tracking-widest shadow-xl hover:bg-red-700 transition-all">Confirm No-Bid</button>
-              </div>
-            </div>
-          </div>
-        )
-      }
+      <NoBidModal
+        isOpen={showNoBidModal}
+        onClose={() => setShowNoBidModal(false)}
+        onConfirm={handleSetNoBid}
+        category={noBidCategory}
+        setCategory={setNoBidCategory}
+      />
 
-      {
-        showOutcomeModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left">
-            <div className="bg-white rounded-[3rem] w-full max-w-xl p-10 shadow-2xl animate-in zoom-in duration-300">
-              <div className="flex items-center gap-4 mb-8">
-                <div className={clsx("p-4 rounded-3xl", showOutcomeModal === 'Won' ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600")}>
-                  {showOutcomeModal === 'Won' ? <Award size={32} /> : <ThumbsDown size={32} />}
-                </div>
-                <div><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Bid Outcome: {showOutcomeModal}</h3><p className="text-sm font-medium text-slate-500">Record learnings.</p></div>
-              </div>
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Learnings</label>
-                  <textarea value={learnings} onChange={e => setLearnings(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-3xl p-6 text-sm font-medium outline-none transition-all" placeholder="Notes..." rows={4} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4 mt-10">
-                <button onClick={() => setShowOutcomeModal(null)} className="py-4 rounded-2xl border border-slate-200 font-black text-slate-400 uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all">Cancel</button>
-                <button onClick={() => handleSetOutcome(showOutcomeModal)} className={clsx("py-4 rounded-2xl text-white font-black uppercase text-[10px] tracking-widest shadow-xl transition-all", showOutcomeModal === 'Won' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100" : "bg-red-600 hover:bg-red-700 shadow-red-100")}>Save Outcome</button>
-              </div>
-            </div>
-          </div>
-        )
-      }
+      <OutcomeModal
+        showOutcomeModal={showOutcomeModal}
+        onClose={() => setShowOutcomeModal(null)}
+        onSave={handleSetOutcome}
+        learnings={learnings}
+        setLearnings={setLearnings}
+      />
 
-      {
-        deletingAssetId && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-            <div className="bg-white rounded-[2.5rem] w-full max-sm p-10 shadow-2xl text-center">
-              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6"><Trash2 size={32} /></div>
-              <h3 className="text-xl font-black text-slate-900 uppercase mb-2">Delete File?</h3>
-              <div className="grid grid-cols-2 gap-4 mt-10">
-                <button onClick={() => setDeletingAssetId(null)} className="py-4 bg-slate-100 text-slate-500 font-black uppercase text-[10px] rounded-xl hover:bg-slate-200 transition-all">Cancel</button>
-                <button onClick={handleDeleteAsset} className="py-4 bg-red-600 text-white font-black uppercase text-[10px] rounded-xl shadow-lg hover:bg-red-700 transition-all">Delete</button>
-              </div>
-            </div>
-          </div>
-        )
-      }
+      <DeleteAssetModal
+        isOpen={!!deletingAssetId}
+        onClose={() => setDeletingAssetId(null)}
+        onConfirm={handleDeleteAsset}
+      />
     </div>
   );
 };
@@ -1726,12 +1583,7 @@ const UploadPortal: React.FC<{ onClick: () => void; title: string; desc: string;
   </div>
 );
 
-const StatBox: React.FC<{ label: string; value: string; color: string }> = ({ label, value, color }) => (
-  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center text-center">
-    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</p>
-    <p className={clsx("text-sm font-black truncate", color)}>{value}</p>
-  </div>
-);
+
 
 const SolutionAnalysisView: React.FC<{ analysis: string | null; isLoading: boolean }> = ({ analysis, isLoading }) => {
   if (isLoading) return null;

@@ -30,7 +30,7 @@ UserSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 // Index for quick lookups
-UserSchema.index({ email: 1 });
+
 UserSchema.index({ role: 1 });
 
 export const User = mongoose.model('User', UserSchema);

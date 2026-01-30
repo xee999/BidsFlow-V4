@@ -21,7 +21,8 @@ interface BidTimeTrackerViewProps {
 }
 
 const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
-    const getDaysBetween = (start: string, end: string) => {
+    const getDaysBetween = (start: string | undefined, end: string | undefined) => {
+        if (!start || !end) return 0;
         const s = new Date(start);
         const e = new Date(end);
         const diffTime = e.getTime() - s.getTime();

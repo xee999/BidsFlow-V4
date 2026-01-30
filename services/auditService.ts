@@ -2,7 +2,7 @@ import { ActivityLog, AuditChangeType, UserRole } from '../types';
 
 // Generate unique ID for activity logs
 const generateId = (): string => {
-    return `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `log_${crypto.randomUUID()}`;
 };
 
 // Format timestamp

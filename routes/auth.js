@@ -4,8 +4,19 @@ import { User } from '../models/User.js';
 import { Role } from '../models/Role.js';
 import { authMiddleware } from '../middleware/auth.js';
 
+import rateLimit from 'express-rate-limit';
+
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'bidsflow-secret-key-2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// Rate limiting for login
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // 5 attempts per IP per window
+    message: { error: 'Too many login attempts, please try again after 15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 // Helper to get role with permissions
 async function getUserWithRole(user) {
@@ -23,18 +34,18 @@ async function getUserWithRole(user) {
 }
 
 // Login
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
         const user = await User.findOne({ email });
 
         if (!user) {
-            console.log(`Login failed: User not found for email ${email}`);
+            // Use generic error message for security
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         if (!user.password) {
-            console.error(`CRITICAL: User document for ${email} is missing the password field! Keys found:`, Object.keys(user.toObject ? user.toObject() : user));
+            console.error(`CRITICAL: User document for ${email} is missing the password field!`);
             return res.status(500).json({ error: 'System error: User account configuration issue' });
         }
 
@@ -44,6 +55,11 @@ router.post('/login', async (req, res) => {
 
         if (!user.isActive) {
             return res.status(401).json({ error: 'Account is deactivated' });
+        }
+
+        if (!JWT_SECRET) {
+            console.error('Login failed: JWT_SECRET not configured');
+            return res.status(500).json({ error: 'Internal server error' });
         }
 
         const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, {

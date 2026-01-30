@@ -23,6 +23,7 @@ import { bidApi, vaultApi, auditApi } from './services/api.ts';
 import { authService, userService } from './services/authService.ts';
 import { auditActions, loadAuditLogs, saveAuditLogs } from './services/auditService.ts';
 import { PermissionProvider, PermissionGuard } from './components/PermissionGuard.tsx';
+import ErrorBoundary from './components/ErrorBoundary.tsx';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -210,88 +211,90 @@ const App: React.FC = () => {
   }
 
   return (
-    <PermissionProvider role={currentUser.role} customPermissions={currentUser.permissions}>
-      <div className="flex bg-[#F1F5F9] min-h-screen overflow-x-hidden">
-        <Sidebar
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          isCollapsed={isSidebarCollapsed}
-          setIsCollapsed={setIsSidebarCollapsed}
-          onLogout={handleLogout}
-          user={currentUser}
-        />
+    <ErrorBoundary>
+      <PermissionProvider role={currentUser.role} customPermissions={currentUser.permissions}>
+        <div className="flex bg-[#F1F5F9] min-h-screen overflow-x-hidden">
+          <Sidebar
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            isCollapsed={isSidebarCollapsed}
+            setIsCollapsed={setIsSidebarCollapsed}
+            onLogout={handleLogout}
+            user={currentUser}
+          />
 
-        <main className={clsx("flex-1 min-h-screen transition-all duration-300 ease-in-out", isSidebarCollapsed ? "ml-20" : "ml-64")}>
-          {showIntake ? (
-            <PermissionGuard section="bid-intake" requiredLevel="edit">
-              <BidIntake onCancel={() => setShowIntake(false)} onInitiate={handleInitiateBid} />
-            </PermissionGuard>
-          ) : (
-            <>
-              {activeTab === 'dashboard' && (
-                <Dashboard bids={bids} user={currentUser} auditTrail={auditTrail} onNewBid={() => setShowIntake(true)} onViewBid={setViewingBidId} onNavigateToFilter={handleNavigateToFilter} />
-              )}
+          <main className={clsx("flex-1 min-h-screen transition-all duration-300 ease-in-out", isSidebarCollapsed ? "ml-20" : "ml-64")}>
+            {showIntake ? (
+              <PermissionGuard section="bid-intake" requiredLevel="edit">
+                <BidIntake onCancel={() => setShowIntake(false)} onInitiate={handleInitiateBid} />
+              </PermissionGuard>
+            ) : (
+              <>
+                {activeTab === 'dashboard' && (
+                  <Dashboard bids={bids} user={currentUser} auditTrail={auditTrail} onNewBid={() => setShowIntake(true)} onViewBid={setViewingBidId} onNavigateToFilter={handleNavigateToFilter} />
+                )}
 
-              {activeTab === 'activity-log' && (
-                <ActivityLogView auditTrail={auditTrail} />
-              )}
+                {activeTab === 'activity-log' && (
+                  <ActivityLogView auditTrail={auditTrail} />
+                )}
 
-              {activeTab === 'all-bids' && (
-                <AllBids
-                  bids={bids}
-                  onViewBid={setViewingBidId}
-                  initialStatus={initialStatusFilter}
-                />
-              )}
+                {activeTab === 'all-bids' && (
+                  <AllBids
+                    bids={bids}
+                    onViewBid={setViewingBidId}
+                    initialStatus={initialStatusFilter}
+                  />
+                )}
 
-              {activeTab === 'studio' && (
-                <PermissionGuard section="studio" requiredLevel="view">
-                  <ProposalStudio bids={bids} onUpdateBid={handleUpdateBid} vaultAssets={vaultAssets} />
-                </PermissionGuard>
-              )}
-              {activeTab === 'vault' && (
-                <PermissionGuard section="vault" requiredLevel="view">
-                  <CorporateVault assets={vaultAssets} setAssets={setVaultAssets} userRole={currentUser?.role} />
-                </PermissionGuard>
-              )}
-              {activeTab === 'calculator' && (
-                <PermissionGuard section="calculator" requiredLevel="view">
-                  <MarginCalculator bids={bids} onUpdate={handleUpdateBid} />
-                </PermissionGuard>
-              )}
-              {activeTab === 'reports' && (
-                <PermissionGuard section="reports" requiredLevel="view">
-                  <ReportsView bids={bids} />
-                </PermissionGuard>
-              )}
-              {activeTab === 'risk-watch' && (
-                <PermissionGuard section="risk-watch" requiredLevel="view">
-                  <RiskWatchView bids={bids} onViewBid={setViewingBidId} />
-                </PermissionGuard>
-              )}
-              {activeTab === 'approvals' && (
-                <PermissionGuard section="approvals" requiredLevel="view">
-                  <ApprovalsView bids={bids} onViewBid={setViewingBidId} />
-                </PermissionGuard>
-              )}
-              {activeTab === 'delete-manager' && (
-                <>
-                  {console.log('Rendering DeleteBidsView directly (Guard Bypassed)')}
-                  <DeleteBidsView bids={bids} onDeleteSuccess={handleDeleteBid} />
-                </>
-              )}
-              {activeTab === 'user-management' && currentUser?.role === 'SUPER_ADMIN' && <UserManagementPanel />}
-              {activeTab === 'settings' && currentUser && (
-                <Settings
-                  currentUser={currentUser}
-                  onUpdateUser={handleUpdateUser}
-                />
-              )}
-            </>
-          )}
-        </main>
-      </div>
-    </PermissionProvider>
+                {activeTab === 'studio' && (
+                  <PermissionGuard section="studio" requiredLevel="view">
+                    <ProposalStudio bids={bids} onUpdateBid={handleUpdateBid} vaultAssets={vaultAssets} />
+                  </PermissionGuard>
+                )}
+                {activeTab === 'vault' && (
+                  <PermissionGuard section="vault" requiredLevel="view">
+                    <CorporateVault assets={vaultAssets} setAssets={setVaultAssets} userRole={currentUser?.role} />
+                  </PermissionGuard>
+                )}
+                {activeTab === 'calculator' && (
+                  <PermissionGuard section="calculator" requiredLevel="view">
+                    <MarginCalculator bids={bids} onUpdate={handleUpdateBid} />
+                  </PermissionGuard>
+                )}
+                {activeTab === 'reports' && (
+                  <PermissionGuard section="reports" requiredLevel="view">
+                    <ReportsView bids={bids} />
+                  </PermissionGuard>
+                )}
+                {activeTab === 'risk-watch' && (
+                  <PermissionGuard section="risk-watch" requiredLevel="view">
+                    <RiskWatchView bids={bids} onViewBid={setViewingBidId} />
+                  </PermissionGuard>
+                )}
+                {activeTab === 'approvals' && (
+                  <PermissionGuard section="approvals" requiredLevel="view">
+                    <ApprovalsView bids={bids} onViewBid={setViewingBidId} />
+                  </PermissionGuard>
+                )}
+                {activeTab === 'delete-manager' && (
+                  <>
+                    {console.log('Rendering DeleteBidsView directly (Guard Bypassed)')}
+                    <DeleteBidsView bids={bids} onDeleteSuccess={handleDeleteBid} />
+                  </>
+                )}
+                {activeTab === 'user-management' && currentUser?.role === 'SUPER_ADMIN' && <UserManagementPanel />}
+                {activeTab === 'settings' && currentUser && (
+                  <Settings
+                    currentUser={currentUser}
+                    onUpdateUser={handleUpdateUser}
+                  />
+                )}
+              </>
+            )}
+          </main>
+        </div>
+      </PermissionProvider>
+    </ErrorBoundary>
   );
 };
 

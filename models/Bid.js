@@ -64,4 +64,12 @@ const BidSchema = new mongoose.Schema({
     phaseTargets: mongoose.Schema.Types.Map,
 }, { timestamps: true });
 
+// Add indexes for performance
+BidSchema.index({ status: 1, deadline: 1 }); // Compound index for filtering
+BidSchema.index({ customerName: 1 });
+BidSchema.index({ receivedDate: -1 });
+BidSchema.index({ 'stageHistory.timestamp': -1 });
+BidSchema.index({ jbcName: 1, status: 1 });
+BidSchema.index({ estimatedValue: -1 });
+
 export const Bid = mongoose.model('Bid', BidSchema);

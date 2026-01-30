@@ -211,7 +211,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
 
     setIsSubmitting(true);
     const newBid: BidRecord = {
-      id: 'bid-' + Math.random().toString(36).substr(2, 9),
+      id: 'bid-' + crypto.randomUUID(),
       customerName: formData.customerName!,
       projectName: formData.projectName!,
       deadline: formData.deadline || new Date().toISOString().split('T')[0],

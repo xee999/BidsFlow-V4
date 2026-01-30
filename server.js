@@ -4,6 +4,10 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import cookieParser from 'cookie-parser';
+import cors from 'cors';
+import helmet from 'helmet';
+import { body, validationResult } from 'express-validator';
+import { authMiddleware } from './middleware/auth.js';
 import { Bid } from './models/Bid.js';
 import { VaultAsset } from './models/VaultAsset.js';
 import { AuditLog } from './models/AuditLog.js';
@@ -24,33 +28,80 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
+// Security Middleware
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'"],
+            imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'", "https://generativelanguage.googleapis.com"],
+            fontSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'self'"],
+            frameSrc: ["'none'"],
+        },
+    },
+}));
+
+app.use(cors({
+    origin: process.env.ALLOWED_ORIGINS ?
+        process.env.ALLOWED_ORIGINS.split(',') :
+        ['http://localhost:5173', 'https://bidsflow-app.run.app'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
+}));
+
 // Increase payload limit for base64 file data
 app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true })); // HIGH-005: Limit Request Sizes
 app.use(cookieParser());
 
-// Request logging middleware
+// Request logging middleware (Non-production only for detailed logs)
 app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    }
     next();
 });
 
-// MongoDB Connection Logic
-if (MONGODB_URI) {
-    mongoose.connect(MONGODB_URI, {
-        serverSelectionTimeoutMS: 5000,
-        connectTimeoutMS: 10000,
-    })
-        .then(async () => {
-            console.log('Connected to MongoDB');
-            // Create default admin user if none exists
-            await createDefaultAdmin();
-            // Seed built-in roles
-            await seedBuiltInRoles();
-        })
-        .catch(err => console.error('MongoDB connection error:', err));
-} else {
-    console.warn('MONGODB_URI not provided. Skipping DB connection.');
-}
+// MongoDB Connection Logic - HIGH-006: DB Connection Recovery
+const connectDB = async () => {
+    if (!MONGODB_URI) {
+        console.warn('MONGODB_URI not provided. Skipping DB connection.');
+        return;
+    }
+
+    try {
+        await mongoose.connect(MONGODB_URI, {
+            serverSelectionTimeoutMS: 5000,
+            connectTimeoutMS: 10000,
+        });
+        console.log('Connected to MongoDB');
+
+        // Create default admin user if none exists
+        await createDefaultAdmin();
+        // Seed built-in roles
+        await seedBuiltInRoles();
+    } catch (err) {
+        console.error('MongoDB connection error:', err);
+        // Retry logic handled by mongoose usually, but explicit retry for initial connection failure
+        console.log('Retrying connection in 5 seconds...');
+        setTimeout(connectDB, 5000);
+    }
+};
+
+mongoose.connection.on('disconnected', () => {
+    console.log('MongoDB disconnected! Attempting to reconnect...');
+});
+
+mongoose.connection.on('reconnected', () => {
+    console.log('MongoDB reconnected.');
+});
+
+connectDB();
 
 // Create default admin user on first startup
 async function createDefaultAdmin() {
@@ -66,31 +117,27 @@ async function createDefaultAdmin() {
 
         const adminExists = await User.findOne({ role: 'SUPER_ADMIN' });
 
-        // If an admin exists but is missing a password (corrupted state), fix it
-        if (adminExists && !adminExists.password) {
-            console.log('Fixing corrupted admin user: missing password');
-            adminExists.password = 'Smart@4ever';
-            await adminExists.save();
-        }
-
         if (!adminExists) {
+            // Generate a strong random password or use env var
+            const adminPassword = process.env.ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex');
+
             const defaultAdmin = new User({
                 id: `user-${crypto.randomUUID()}`,
                 email: 'admin@bidsflow.com',
-                password: 'Smart@4ever',
+                password: adminPassword,
                 name: 'Super Admin',
                 role: 'SUPER_ADMIN',
                 isActive: true,
             });
             await defaultAdmin.save();
-            console.log('Default admin user created: admin@bidsflow.com / Smart@4ever');
-        } else {
-            // Also ensure the specific admin@bidsflow.com exists or has a password
-            const specificAdmin = await User.findOne({ email: 'admin@bidsflow.com' });
-            if (specificAdmin && !specificAdmin.password) {
-                console.log('Fixing specifically admin@bidsflow.com: missing password');
-                specificAdmin.password = 'Smart@4ever';
-                await specificAdmin.save();
+
+            if (process.env.NODE_ENV !== 'production') {
+                console.log('⚠️  SECURITY: Default admin created.');
+                console.log('   Email: admin@bidsflow.com');
+                console.log(`   Password: ${adminPassword}`); // Only show in non-prod
+                console.log('⚠️  IMPORTANT: Change this password immediately!');
+            } else {
+                console.log('Default admin user created. Check secure logs for details or reset password.');
             }
         }
     } catch (err) {
@@ -123,13 +170,22 @@ app.get('/api/health', (req, res) => {
 });
 
 // AI Analysis Proxy
-app.post('/api/ai/analyze-bid', async (req, res) => {
+// AI Analysis Proxy - Secured
+app.post('/api/ai/analyze-bid', authMiddleware, async (req, res) => {
     try {
         const { fileName, fileContentBase64 } = req.body;
         if (!fileContentBase64) {
             return res.status(400).json({ error: 'File content is required' });
         }
-        console.log(`Server handling AI analysis for: ${fileName} (${Math.round(fileContentBase64.length / 1024)} KB)`);
+
+        // Basic size check before processing (though limit is 50mb, we might want to be stricter here)
+        // 15MB limit for PDFs
+        if (fileContentBase64.length > 15 * 1024 * 1024 * 1.37) { // ~15MB in base64
+            return res.status(413).json({ error: 'File too large. Maximum 15MB.' });
+        }
+
+        console.log(`AI analysis requested by ${req.user.email} for: ${fileName}`);
+
         const result = await analyzeBidDocumentServer(fileName, fileContentBase64);
         res.json(result);
     } catch (err) {
@@ -159,7 +215,22 @@ app.get('/api/bids', checkDbConnection, async (req, res) => {
     }
 });
 
-app.post('/api/bids', checkDbConnection, async (req, res) => {
+// Validation Middleware
+const validateBid = [
+    body('customerName').trim().notEmpty().withMessage('Customer name is required').isLength({ max: 200 }).escape(),
+    body('projectName').trim().notEmpty().withMessage('Project name is required').isLength({ max: 300 }).escape(),
+    body('deadline').optional().isISO8601().toDate().withMessage('Invalid deadline date'),
+    body('estimatedValue').optional().isNumeric().withMessage('Estimated value must be a number'),
+    body('status').optional().isIn(['Active', 'Submitted', 'Won', 'Lost', 'No Bid']).withMessage('Invalid status'),
+    body('currency').optional().isIn(['PKR', 'USD', 'EUR']).withMessage('Invalid currency'),
+];
+
+app.post('/api/bids', checkDbConnection, validateBid, async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
     try {
         const bid = new Bid(req.body);
         await bid.save();

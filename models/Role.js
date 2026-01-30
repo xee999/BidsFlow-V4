@@ -19,7 +19,7 @@ const RoleSchema = new mongoose.Schema({
     isBuiltIn: { type: Boolean, default: false },
 }, { timestamps: true });
 
-RoleSchema.index({ name: 1 });
+
 RoleSchema.index({ isBuiltIn: 1 });
 
 export const Role = mongoose.model('Role', RoleSchema);

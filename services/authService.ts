@@ -2,7 +2,7 @@
 const API_BASE = '/api/auth';
 
 export const authService = {
-    login: async (email, password) => {
+    login: async (email: string, password: string) => {
         const res = await fetch(`${API_BASE}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -32,7 +32,7 @@ export const userService = {
         if (!res.ok) throw new Error('Failed to fetch users');
         return res.json();
     },
-    create: async (userData) => {
+    create: async (userData: any) => {
         const res = await fetch('/api/users', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -44,7 +44,7 @@ export const userService = {
         }
         return res.json();
     },
-    update: async (id, userData) => {
+    update: async (id: string, userData: any) => {
         const res = await fetch(`/api/users/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -53,7 +53,7 @@ export const userService = {
         if (!res.ok) throw new Error('Failed to update user');
         return res.json();
     },
-    delete: async (id) => {
+    delete: async (id: string) => {
         const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
         if (!res.ok) throw new Error('Failed to deactivate user');
         return res.json();

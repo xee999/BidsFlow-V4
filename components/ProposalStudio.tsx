@@ -78,7 +78,7 @@ const ProposalStudio: React.FC<ProposalStudioProps> = ({ bids, onUpdateBid, vaul
       const result = await extractProposalOutline(tenderDoc.fileData);
       if (result?.sections && result.sections.length > 0) {
         const newSections: ProposalSection[] = result.sections.map((s: any) => ({
-          id: s.id || `sec-${Math.random().toString(36).substr(2, 9)}`,
+          id: s.id || `sec-${crypto.randomUUID()}`,
           title: s.title,
           content: '',
           status: 'pending',
@@ -139,7 +139,7 @@ const ProposalStudio: React.FC<ProposalStudioProps> = ({ bids, onUpdateBid, vaul
 
   const handleAddSection = () => {
     if (!selectedBid) return;
-    const newId = `sec-${Math.random().toString(36).substr(2, 9)}`;
+    const newId = `sec-${crypto.randomUUID()}`;
     const newSection: ProposalSection = {
       id: newId,
       title: 'New Response Chapter',
