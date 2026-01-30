@@ -26,8 +26,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-// TODO: Revert this to process.env.MONGODB_URI after updating Cloud Run secrets
-const MONGODB_URI = process.env.MONGODB_URI_OVERRIDE || 'mongodb://admin:secretpassword@34.172.151.20:27017/bidsflow?authSource=admin';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // Security Middleware
 app.use(helmet({
