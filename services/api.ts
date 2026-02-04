@@ -22,6 +22,15 @@ export const bidApi = {
         if (!res.ok) throw new Error('Failed to create bid');
         return res.json();
     },
+    checkDuplicate: async (customerName: string, projectName: string): Promise<{ isDuplicate: boolean; candidates: any[] }> => {
+        const res = await fetch(`${API_BASE}/bids/check-duplicate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ customerName, projectName }),
+        });
+        if (!res.ok) throw new Error('Failed to check duplicates');
+        return res.json();
+    },
     update: async (bid: BidRecord): Promise<BidRecord> => {
         const res = await fetch(`${API_BASE}/bids/${bid.id}`, {
             method: 'PUT',

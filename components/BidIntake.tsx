@@ -5,6 +5,7 @@ import { analyzeBidDocument, setAINotificationCallback, AINotification } from '.
 import { SOLUTION_OPTIONS } from '../constants.tsx';
 import { clsx } from 'clsx';
 import { convertToDays, convertToYears, sanitizeDateValue, sanitizeTimeValue } from '../services/utils.ts';
+import { bidApi } from '../services/api.ts';
 import Toast, { ToastMessage } from './Toast.tsx';
 
 interface BidIntakeProps {
@@ -18,6 +19,8 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
   const [aiError, setAiError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+  const [duplicateCandidates, setDuplicateCandidates] = useState<any[]>([]);
   const [formData, setFormData] = useState<Partial<BidRecord>>({
     customerName: '',
     projectName: '',
@@ -209,6 +212,25 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
       return;
     }
 
+    setIsSubmitting(true);
+
+    // Check for duplicates first
+    try {
+      const dupResult = await bidApi.checkDuplicate(formData.customerName!, formData.projectName!);
+      if (dupResult.isDuplicate) {
+        setDuplicateCandidates(dupResult.candidates);
+        setShowDuplicateWarning(true);
+        setIsSubmitting(false);
+        return;
+      }
+    } catch (err) {
+      console.error("Duplicate check failed, proceeding anyway", err);
+    }
+
+    proceedWithSubmission();
+  };
+
+  const proceedWithSubmission = () => {
     setIsSubmitting(true);
     const newBid: BidRecord = {
       id: 'bid-' + crypto.randomUUID(),
@@ -595,6 +617,51 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
           </div>
         </div>
       </form>
+      {/* Duplicate Warning Modal */}
+      {showDuplicateWarning && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] animate-in fade-in duration-200">
+          <div className="bg-white p-8 rounded-3xl max-w-lg w-full m-4 shadow-2xl border-4 border-amber-100">
+            <div className="flex items-center gap-4 mb-6 text-amber-600">
+              <AlertTriangle size={32} />
+              <h3 className="text-xl font-black uppercase tracking-tight">Potential Duplicate Detected</h3>
+            </div>
+
+            <p className="text-sm font-medium text-slate-600 mb-4">
+              Similar bids already exist for this customer. Are you sure you want to create a duplicate?
+            </p>
+
+            <div className="bg-slate-50 rounded-2xl p-4 mb-8 max-h-48 overflow-y-auto border border-slate-100">
+              {duplicateCandidates.map((cand: any) => (
+                <div key={cand.id} className="mb-3 last:mb-0 p-3 bg-white rounded-xl border border-slate-200">
+                  <div className="text-xs font-black uppercase text-slate-400 tracking-wider mb-1">
+                    Match Score: {Math.round(cand.similarity * 100)}%
+                  </div>
+                  <div className="font-bold text-slate-800 text-sm">{cand.projectName}</div>
+                  <div className="text-xs text-slate-500 mt-1">{cand.status} • {cand.customerName}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                type="button"
+                onClick={() => { setShowDuplicateWarning(false); setIsSubmitting(false); }}
+                className="flex-1 py-3 px-6 bg-slate-100 text-slate-600 font-bold uppercase tracking-widest text-xs rounded-xl hover:bg-slate-200 transition-colors"
+              >
+                Cancel & Review
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowDuplicateWarning(false); proceedWithSubmission(); }}
+                className="flex-1 py-3 px-6 bg-amber-500 text-white font-bold uppercase tracking-widest text-xs rounded-xl hover:bg-amber-600 transition-colors shadow-lg shadow-amber-200"
+              >
+                Proceed Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   );

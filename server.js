@@ -270,6 +270,68 @@ app.post('/api/bids', checkDbConnection, validateBid, async (req, res) => {
     }
 });
 
+// Helper for Levenshtein Distance
+const levenshteinDistance = (a, b) => {
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) {
+        matrix[i] = [i];
+    }
+    for (let j = 0; j <= a.length; j++) {
+        matrix[0][j] = j;
+    }
+    for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j - 1] + 1,
+                    matrix[i][j - 1] + 1,
+                    matrix[i - 1][j] + 1
+                );
+            }
+        }
+    }
+    return matrix[b.length][a.length];
+};
+
+app.post('/api/bids/check-duplicate', checkDbConnection, async (req, res) => {
+    try {
+        const { customerName, projectName } = req.body;
+
+        if (!customerName || !projectName) {
+            return res.status(400).json({ error: 'Customer Name and Project Name are required' });
+        }
+
+        // 1. Find matched customers (case-insensitive)
+        const candidates = await Bid.find({
+            customerName: { $regex: new RegExp(`^${customerName}$`, 'i') }
+        }).select('id customerName projectName status').lean();
+
+        if (candidates.length === 0) {
+            return res.json({ isDuplicate: false, candidates: [] });
+        }
+
+        // 2. Fuzzy Match Project Name
+        const duplicates = candidates.map(bid => {
+            const distance = levenshteinDistance(projectName.toLowerCase(), bid.projectName.toLowerCase());
+            const maxLength = Math.max(projectName.length, bid.projectName.length);
+            const similarity = 1 - (distance / maxLength);
+
+            return { ...bid, similarity };
+        }).filter(bid => bid.similarity > 0.7); // Threshold: 70% match
+
+        res.json({
+            isDuplicate: duplicates.length > 0,
+            candidates: duplicates.sort((a, b) => b.similarity - a.similarity)
+        });
+
+    } catch (err) {
+        console.error('Error checking duplicates:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.put('/api/bids/:id', checkDbConnection, async (req, res) => {
     try {
         const bid = await Bid.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
