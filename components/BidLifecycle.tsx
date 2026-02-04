@@ -8,7 +8,7 @@ import {
   FileSpreadsheet, Package, BadgeDollarSign, Plus, Briefcase, Layers,
   FileBox, ClipboardList, FileSearch, FileBadge, ExternalLink, Filter,
   Activity, Calculator, Lock, Archive, Tag, Trash2, Flag, Award, ThumbsUp,
-  MapPin, Banknote, Landmark
+  MapPin, Banknote, Landmark, StickyNote, X
 } from 'lucide-react';
 import { BidRecord, BidStage, BidStatus, TechnicalDocument, StageTransition, ComplianceItem, QualificationItem, RiskLevel, FinancialFormat, ApprovingAuthorityRole, ActivityLog, User } from '../types.ts';
 import { STAGE_ICONS } from '../constants.tsx';
@@ -98,6 +98,8 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [isAddingNote, setIsAddingNote] = useState(false);
 
   const navRef = useRef<HTMLDivElement>(null);
   const refs = {
@@ -1415,8 +1417,109 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                 </div>
               ))}
             </div>
+
+            {/* Notes Section */}
+            <div className="mt-12 pt-8 border-t border-slate-100">
+              <div className="flex items-center justify-between mb-6 px-2">
+                <div className="flex items-center gap-3">
+                  <StickyNote className="text-amber-500" size={20} />
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Bid Notes</h3>
+                </div>
+                {userRole !== 'VIEWER' && (
+                  <button
+                    onClick={() => setIsAddingNote(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-amber-100 transition-all border border-amber-200"
+                  >
+                    <Plus size={14} /> Add Note
+                  </button>
+                )}
+              </div>
+
+              {/* Add Note Form */}
+              {isAddingNote && (
+                <div className="mb-6 p-5 bg-amber-50 border border-amber-200 rounded-2xl">
+                  <textarea
+                    autoFocus
+                    value={newNoteContent}
+                    onChange={(e) => setNewNoteContent(e.target.value)}
+                    placeholder="Write your note here..."
+                    className="w-full bg-white/80 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 font-medium resize-none h-24 outline-none focus:border-amber-400 transition-all"
+                  />
+                  <div className="flex justify-end gap-3 mt-3">
+                    <button
+                      onClick={() => {
+                        setIsAddingNote(false);
+                        setNewNoteContent('');
+                      }}
+                      className="px-4 py-2 text-slate-500 text-xs font-bold uppercase hover:text-slate-700 transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (newNoteContent.trim() && currentUser) {
+                          const newNote = {
+                            id: `note-${Date.now()}`,
+                            content: newNoteContent.trim(),
+                            color: '#FEF3C7',
+                            createdAt: new Date().toISOString(),
+                            createdBy: currentUser.name
+                          };
+                          const updatedNotes = [...(bid.notes || []), newNote];
+                          onUpdate({ ...bid, notes: updatedNotes });
+                          setNewNoteContent('');
+                          setIsAddingNote(false);
+                        }
+                      }}
+                      className="px-5 py-2 bg-amber-500 text-white rounded-xl text-xs font-black uppercase hover:bg-amber-600 transition-all"
+                    >
+                      Save Note
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Notes Grid */}
+              {bid.notes && bid.notes.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pb-10">
+                  {bid.notes.map((note) => (
+                    <div
+                      key={note.id}
+                      className="p-5 rounded-2xl border shadow-sm transition-all hover:shadow-md group relative"
+                      style={{ backgroundColor: note.color || '#FEF3C7', borderColor: 'rgba(0,0,0,0.1)' }}
+                    >
+                      <p className="text-sm text-amber-900 font-medium leading-relaxed whitespace-pre-wrap">{note.content}</p>
+                      <div className="mt-4 pt-3 border-t border-amber-900/10 flex items-center justify-between">
+                        <span className="text-[9px] text-amber-800/60 font-bold">{note.createdBy}</span>
+                        <span className="text-[9px] text-amber-800/40 font-medium">
+                          {new Date(note.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {userRole !== 'VIEWER' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const updatedNotes = (bid.notes || []).filter(n => n.id !== note.id);
+                            onUpdate({ ...bid, notes: updatedNotes });
+                          }}
+                          className="absolute top-2 right-2 p-1 text-red-400 hover:text-red-600 rounded-full hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <X size={12} strokeWidth={3} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-10 text-slate-400">
+                  <StickyNote size={32} className="mx-auto mb-3 opacity-30" />
+                  <p className="text-xs font-bold uppercase tracking-widest">No notes yet</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
+
 
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[30] flex gap-4 items-center">
           <div className="bg-white/90 backdrop-blur-md border border-slate-200 p-2 rounded-full shadow-2xl flex items-center gap-2">

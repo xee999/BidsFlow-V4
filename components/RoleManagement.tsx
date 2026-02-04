@@ -27,7 +27,7 @@ const SECTION_GROUPS = [
     {
         title: 'Analytics & Risk',
         icon: <BarChart3 size={14} className="text-purple-500" />,
-        sections: ['reports', 'risk-watch', 'calculator'] as AppSection[]
+        sections: ['reports', 'risk-watch', 'calculator', 'calendar'] as AppSection[]
     },
     {
         title: 'Administration',
@@ -70,6 +70,7 @@ const RoleManagement: React.FC = () => {
             'reports': 'none',
             'risk-watch': 'none',
             'settings': 'none',
+            'calendar': 'none',
             'delete-manager': 'none',
         }
     });
@@ -106,6 +107,7 @@ const RoleManagement: React.FC = () => {
                 'reports': 'none',
                 'risk-watch': 'none',
                 'settings': 'none',
+                'calendar': 'none',
                 'delete-manager': 'none',
             }
         });

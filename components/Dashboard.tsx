@@ -1,5 +1,6 @@
 
 import React, { useMemo } from 'react';
+import { COLORS, SOLUTION_COLORS } from '../constants.tsx';
 import {
   TrendingUp, Clock, AlertCircle, ArrowUpRight, Plus,
   Calendar, Activity, CheckCircle2, Briefcase,
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react';
 import { BidRecord, BidStatus, BidStage, RiskLevel, User, ActivityLog } from '../types.ts';
 import { clsx } from 'clsx';
+import { sanitizeDateValue, calculateIntegrity, getIntegrityColor } from '../services/utils';
 
 interface DashboardProps {
   bids: BidRecord[];
@@ -27,19 +29,6 @@ const STAGE_COLORS: Record<string, { bg: string, text: string, border: string }>
   [BidStage.FINAL_REVIEW]: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200' }
 };
 
-const SOLUTION_COLORS: Record<string, { bg: string, text: string, border: string }> = {
-  'Quantica': { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
-  'GSM Data': { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-200' },
-  'M2M (Devices Only)': { bg: 'bg-indigo-100', text: 'text-indigo-700', border: 'border-indigo-200' },
-  'IoT': { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' },
-  'IT Devices (Laptop/Desktop)': { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200' },
-  'Mobile Devices (Phone or Tablet)': { bg: 'bg-pink-100', text: 'text-pink-700', border: 'border-pink-200' },
-  'CPaaS': { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-200' },
-  'Cloud & IT': { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-200' },
-  'Managed Services': { bg: 'bg-violet-100', text: 'text-violet-700', border: 'border-violet-200' },
-  'Fixed Connectivity': { bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200' },
-  'System Integration': { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200' }
-};
 
 const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid, onViewBid, onNavigateToFilter }) => {
   const [sortBy, setSortBy] = React.useState<'priority' | 'due' | 'intake'>('priority');
@@ -62,17 +51,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
     return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
   };
 
-  const calculateIntegrity = (bid: BidRecord) => {
-    const weights = bid.integrityScoreBreakdown || { technicalWeight: 30, complianceWeight: 30, commercialWeight: 30, legalWeight: 10 };
-    const techItems = bid.technicalQualificationChecklist || [];
-    const compItems = bid.complianceChecklist || [];
-    const finItems = bid.financialFormats || [];
-    const techScore = techItems.length > 0 ? (techItems.filter(i => i.status === 'Complete').length / techItems.length) * weights.technicalWeight : weights.technicalWeight;
-    const compScore = compItems.length > 0 ? (compItems.filter(i => i.status === 'Complete').length / compItems.length) * weights.complianceWeight : weights.complianceWeight;
-    const commScore = finItems.length > 0 ? (finItems.filter(i => (i.unitPrice ?? 0) > 0).length / finItems.length) * weights.commercialWeight : 0;
-    const legalScore = (bid.managementApprovalStatus === 'Approved' ? 1 : 0) * weights.legalWeight;
-    return Math.round(techScore + compScore + commScore + legalScore);
-  };
+
 
   const getPriorityContext = (bid: BidRecord) => {
     let score = 0;
@@ -255,7 +234,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
             </div>
 
             <div className="p-6 space-y-4">
-              {prioritizedBids.length > 0 ? prioritizedBids.map((bid) => {
+              {prioritizedBids.slice(0, 20).length > 0 ? prioritizedBids.slice(0, 20).map((bid) => {
                 const stageColor = STAGE_COLORS[bid.currentStage] || { bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-100' };
                 const solutionName = bid.requiredSolutions[0] || 'Solution TBD';
                 const solutionColor = SOLUTION_COLORS[solutionName] || { bg: 'bg-slate-50', text: 'text-slate-500', border: 'border-slate-100' };
@@ -285,7 +264,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
                       </div>
                       <div className="flex flex-col items-end gap-2">
                         <div className={clsx("flex items-center gap-2", getDaysLeft(bid.deadline) <= 3 ? "text-red-500" : "text-slate-400")}><Clock size={14} /><span className="text-xs font-black uppercase tracking-tighter">{getDaysLeft(bid.deadline) <= 3 ? "URGENT" : "TIMELINE"}</span></div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">{bid.deadline}</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">{sanitizeDateValue(bid.deadline) || bid.deadline}</span>
                       </div>
                     </div>
                     <div className="space-y-3">
@@ -294,7 +273,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
                         <span className="text-slate-900">{bid.integrity}%</span>
                       </div>
                       <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-[#D32F2F] transition-all duration-1000" style={{ width: `${bid.integrity}%` }}></div>
+                        <div className="h-full transition-all duration-1000" style={{ width: `${bid.integrity}%`, backgroundColor: getIntegrityColor(bid.integrity) }}></div>
                       </div>
                     </div>
                   </div>
@@ -309,16 +288,16 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
             <div className="space-y-4">
               {deadlines.length > 0 ? deadlines.map(bid => (
                 <div key={bid.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between group cursor-pointer hover:bg-white hover:shadow-lg transition-all">
-                  <div className="min-w-0"><p className="text-xs font-black text-slate-900 truncate group-hover:text-[#D32F2F]">{bid.projectName}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">{bid.deadline}</p></div>
+                  <div className="min-w-0"><p className="text-xs font-black text-slate-900 truncate group-hover:text-[#D32F2F]">{bid.projectName}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">{sanitizeDateValue(bid.deadline) || bid.deadline}</p></div>
                   <div className={clsx("text-white text-[9px] font-black px-2 py-1 rounded-lg", getDaysLeft(bid.deadline) <= 3 ? "bg-red-500" : "bg-slate-400")}>{getDaysLeft(bid.deadline) <= 3 ? "DUE" : "SOON"}</div>
                 </div>
               )) : <p className="text-[10px] text-slate-400 font-bold uppercase text-center py-4 italic">No upcoming deadlines</p>}
             </div>
           </div>
           <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm p-8">
-            <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-8 flex items-center gap-2"><Activity size={18} className="text-[#D32F2F]" /> Audit Trail</h3>
+            <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-8 flex items-center gap-2"><Activity size={18} className="text-[#D32F2F]" /> Activity Log</h3>
             <div className="space-y-6">
-              {auditTrail.map((act) => (
+              {auditTrail.slice(0, 20).map((act) => (
                 <div key={act.id} className="flex gap-4">
                   <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-black text-[10px] text-slate-500 shrink-0 uppercase">{act.userName.split(' ').map(n => n[0]).join('')}</div>
                   <div className="min-w-0 flex-1"><p className="text-[11px] text-slate-600 leading-snug"><span className="font-black text-slate-900">{act.userName}</span><span className="text-[9px] text-[#D32F2F] font-bold mx-1 uppercase">[{act.userRoleName || getRoleDisplayName(act.userRole as any)}]</span> {act.action} <span className="font-black text-slate-900">{act.target}</span></p><p className="text-[9px] text-slate-400 font-bold mt-0.5">{act.subText}</p><p className="text-[9px] text-slate-400 mt-2 font-bold uppercase tracking-widest">{act.timestamp}</p></div>
@@ -329,6 +308,16 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
             </div>
           </div>
         </div>
+      </div>
+
+      {/* View All Bids Button */}
+      <div className="flex justify-center pt-4">
+        <button
+          onClick={() => onNavigateToFilter('All')}
+          className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-8 py-4 rounded-2xl font-black uppercase text-xs tracking-widest flex items-center gap-2 transition-all active:scale-95 border border-slate-200"
+        >
+          View All Bids <ArrowUpRight size={16} />
+        </button>
       </div>
     </div>
   );

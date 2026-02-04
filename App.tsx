@@ -15,6 +15,7 @@ import ActivityLogView from './components/ActivityLogView.tsx';
 import UserManagementPanel from './components/UserManagementPanel.tsx';
 import Login from './components/Login.tsx';
 import DeleteBidsView from './components/DeleteBidsView.tsx';
+import CalendarView from './components/CalendarView.tsx';
 import { BidRecord, BidStatus, BidStage, RiskLevel, User, ActivityLog, TechnicalDocument } from './types.ts';
 import { NAV_ITEMS, SOLUTION_OPTIONS } from './constants.tsx';
 import { Search, X, Calendar, Filter, Clock, Send, Trophy, ZapOff, Ban, Briefcase, ChevronDown, Zap, Loader2 } from 'lucide-react';
@@ -205,9 +206,66 @@ const App: React.FC = () => {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
+  const handleSetViewingBidId = async (id: string | null) => {
+    if (!id) {
+      setViewingBidId(null);
+      return;
+    }
+
+    // Checking if we already have the full bid with technicalDocuments
+    const currentBid = bids.find(b => b.id === id);
+    if (currentBid && currentBid.technicalDocuments) {
+      setViewingBidId(id);
+      return;
+    }
+
+    // If not loaded, fetch the full details from the server
+    setIsLoadingData(true);
+    try {
+      const fullBid = await bidApi.getById(id);
+      // Update local bids collection with the full data, but preserve local notes if they haven't synced yet
+      setBids(prev => prev.map(b => {
+        if (b.id === id) {
+          // Intelligent merge for notes to handle race condition (Optimistic UI vs Stale Server Data)
+          let mergedNotes = fullBid.notes || [];
+          if (b.notes && b.notes.length > 0) {
+            // If we have local notes that aren't in the server response yet, keep them
+            const serverNoteIds = new Set(mergedNotes.map(n => n.id));
+            const missingNotes = b.notes.filter(n => !serverNoteIds.has(n.id));
+            if (missingNotes.length > 0) {
+              mergedNotes = [...mergedNotes, ...missingNotes];
+            }
+          }
+
+          return {
+            ...fullBid,
+            notes: mergedNotes
+          };
+        }
+        return b;
+      }));
+      setViewingBidId(id);
+    } catch (err) {
+      console.error('Failed to fetch full bid details:', err);
+      // Fallback: still show what we have, but maybe warn
+      setViewingBidId(id);
+    } finally {
+      setIsLoadingData(false);
+    }
+  };
+
   if (viewingBidId) {
     const currentBid = bids.find(b => b.id === viewingBidId);
-    if (currentBid) return <BidLifecycle bid={currentBid} onUpdate={handleUpdateBid} onClose={() => setViewingBidId(null)} userRole={currentUser.role} addAuditLog={addAuditLog} currentUser={currentUser} />;
+    if (currentBid) return (
+      <BidLifecycle
+        bid={currentBid}
+        onUpdate={handleUpdateBid}
+        onClose={() => setViewingBidId(null)}
+        userRole={currentUser.role}
+        addAuditLog={addAuditLog}
+        currentUser={currentUser}
+      />
+    );
   }
 
   return (
@@ -231,7 +289,7 @@ const App: React.FC = () => {
             ) : (
               <>
                 {activeTab === 'dashboard' && (
-                  <Dashboard bids={bids} user={currentUser} auditTrail={auditTrail} onNewBid={() => setShowIntake(true)} onViewBid={setViewingBidId} onNavigateToFilter={handleNavigateToFilter} />
+                  <Dashboard bids={bids} user={currentUser} auditTrail={auditTrail} onNewBid={() => setShowIntake(true)} onViewBid={handleSetViewingBidId} onNavigateToFilter={handleNavigateToFilter} />
                 )}
 
                 {activeTab === 'activity-log' && (
@@ -241,7 +299,7 @@ const App: React.FC = () => {
                 {activeTab === 'all-bids' && (
                   <AllBids
                     bids={bids}
-                    onViewBid={setViewingBidId}
+                    onViewBid={handleSetViewingBidId}
                     initialStatus={initialStatusFilter}
                   />
                 )}
@@ -268,12 +326,22 @@ const App: React.FC = () => {
                 )}
                 {activeTab === 'risk-watch' && (
                   <PermissionGuard section="risk-watch" requiredLevel="view">
-                    <RiskWatchView bids={bids} onViewBid={setViewingBidId} />
+                    <RiskWatchView bids={bids} onViewBid={handleSetViewingBidId} />
+                  </PermissionGuard>
+                )}
+                {activeTab === 'calendar' && (
+                  <PermissionGuard section="calendar" requiredLevel="view">
+                    <CalendarView
+                      bids={bids}
+                      currentUser={currentUser}
+                      onUpdateBid={handleUpdateBid}
+                      onViewBid={handleSetViewingBidId}
+                    />
                   </PermissionGuard>
                 )}
                 {activeTab === 'approvals' && (
                   <PermissionGuard section="approvals" requiredLevel="view">
-                    <ApprovalsView bids={bids} onViewBid={setViewingBidId} />
+                    <ApprovalsView bids={bids} onViewBid={handleSetViewingBidId} />
                   </PermissionGuard>
                 )}
                 {activeTab === 'delete-manager' && (

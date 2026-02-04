@@ -8,6 +8,11 @@ export const bidApi = {
         if (!res.ok) throw new Error('Failed to fetch bids');
         return res.json();
     },
+    getById: async (id: string): Promise<BidRecord> => {
+        const res = await fetch(`${API_BASE}/bids/${id}`);
+        if (!res.ok) throw new Error('Failed to fetch bid details');
+        return res.json();
+    },
     create: async (bid: BidRecord): Promise<BidRecord> => {
         const res = await fetch(`${API_BASE}/bids`, {
             method: 'POST',
@@ -40,6 +45,11 @@ export const vaultApi = {
         if (!res.ok) throw new Error('Failed to fetch vault assets');
         return res.json();
     },
+    getById: async (id: string): Promise<TechnicalDocument> => {
+        const res = await fetch(`${API_BASE}/vault/${id}`);
+        if (!res.ok) throw new Error('Failed to fetch vault asset details');
+        return res.json();
+    },
     create: async (asset: TechnicalDocument): Promise<TechnicalDocument> => {
         const res = await fetch(`${API_BASE}/vault`, {
             method: 'POST',
@@ -50,8 +60,6 @@ export const vaultApi = {
         return res.json();
     },
     update: async (asset: TechnicalDocument): Promise<TechnicalDocument> => {
-        // We can add a PUT route for vault if needed, or use the post route if it handles upserts.
-        // For now, let's assume we have a PUT /api/vault/:id route (I'll add it to server.js).
         const res = await fetch(`${API_BASE}/vault/${asset.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -59,6 +67,12 @@ export const vaultApi = {
         });
         if (!res.ok) throw new Error('Failed to update vault asset');
         return res.json();
+    },
+    remove: async (id: string): Promise<void> => {
+        const res = await fetch(`${API_BASE}/vault/${id}`, {
+            method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Failed to delete vault asset');
     },
 };
 

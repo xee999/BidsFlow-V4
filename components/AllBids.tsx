@@ -2,8 +2,9 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Calendar, Filter, Clock, Send, Trophy, ZapOff, Ban, Briefcase, ChevronDown, Zap } from 'lucide-react';
 import { BidRecord, BidStatus, BidStage } from '../types.ts';
-import { SOLUTION_OPTIONS } from '../constants.tsx';
+import { SOLUTION_OPTIONS, SOLUTION_COLORS } from '../constants.tsx';
 import { clsx } from 'clsx';
+import { sanitizeDateValue, calculateIntegrity, getIntegrityColor } from '../services/utils';
 
 interface AllBidsProps {
     bids: BidRecord[];
@@ -289,7 +290,7 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                                             "bg-slate-100"
                         )} />
 
-                        <div className="flex justify-between items-start mb-10 mt-2">
+                        <div className="flex justify-between items-start mb-8 mt-2">
                             <span className={clsx(
                                 "px-5 h-8 flex items-center rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm border",
                                 bid.status === BidStatus.WON ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
@@ -306,25 +307,54 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                             </div>
                         </div>
 
-                        <h3 className="text-2xl font-black text-[#0F172A] group-hover:text-[#D32F2F] transition-colors line-clamp-2 leading-[1.05] uppercase tracking-tighter mb-4 pr-4">
+                        <h3 className="text-2xl font-black text-[#0F172A] group-hover:text-[#D32F2F] transition-colors line-clamp-2 leading-[1.05] uppercase tracking-tighter mb-3 pr-4">
                             {bid.projectName}
                         </h3>
-                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest relative">
+
+                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4">
                             {bid.customerName}
-                            <span className="block w-12 h-1 bg-slate-100 mt-4 group-hover:w-20 group-hover:bg-[#D32F2F] transition-all duration-500"></span>
                         </p>
 
-                        <div className="mt-auto pt-10 flex items-center justify-between text-[11px] font-black text-slate-400 uppercase tracking-widest">
-                            <div className="flex items-center gap-2 group-hover:text-slate-600 transition-colors">
-                                <Calendar size={14} className="text-[#D32F2F]/60 group-hover:text-[#D32F2F]" />
-                                {bid.deadline}
-                            </div>
-                            <div className="flex items-center gap-2 bg-slate-50 px-4 py-2 rounded-xl group-hover:bg-[#1E3A5F]/5 transition-colors">
-                                <Briefcase size={14} className="text-[#1E3A5F]" />
-                                {bid.currentStage}
-                            </div>
+                        {/* Solution Pill - Prominent placement */}
+                        {bid.requiredSolutions && bid.requiredSolutions.length > 0 && (() => {
+                            const solutionName = bid.requiredSolutions[0];
+                            const sc = SOLUTION_COLORS[solutionName] || { bg: 'bg-slate-50', text: 'text-slate-500', border: 'border-slate-100' };
+                            return (
+                                <span className={clsx(
+                                    "inline-flex px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border mb-6",
+                                    sc.bg, sc.text, sc.border
+                                )}>
+                                    {solutionName}
+                                </span>
+                            );
+                        })()}
+
+                        {/* Progress Bar - Visual separator */}
+                        {(() => {
+                            const integrity = calculateIntegrity(bid);
+
+                            return (
+                                <div className="mt-auto mb-6 space-y-3">
+                                    <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                        <span>Bid Progression</span>
+                                        <span className="text-slate-900">{integrity}%</span>
+                                    </div>
+                                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="h-full transition-all duration-1000" style={{ width: `${integrity}%`, backgroundColor: getIntegrityColor(integrity) }}></div>
+                                    </div>
+                                </div>
+                            );
+
+                        })()}
+
+
+                        {/* Footer - Clean date display */}
+                        <div className="flex items-center gap-2 text-[11px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-600 transition-colors">
+                            <Calendar size={14} className="text-[#D32F2F]/60 group-hover:text-[#D32F2F]" />
+                            Due: {sanitizeDateValue(bid.deadline) || bid.deadline}
                         </div>
                     </div>
+
                 ))}
 
                 {/* Empty State Redesign */}
@@ -343,3 +373,4 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
 };
 
 export default AllBids;
+

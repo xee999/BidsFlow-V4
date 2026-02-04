@@ -15,6 +15,7 @@ import {
 import { BidRecord, BidStatus, BidStage } from '../types.ts';
 import { STAGE_COLORS } from './ReportsView.tsx';
 import { clsx } from 'clsx';
+import { sanitizeDateValue } from '../services/utils';
 
 interface BidTimeTrackerViewProps {
     bids: BidRecord[];
@@ -164,8 +165,8 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                                         <td className="px-12 py-10 min-w-[500px]">
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase px-1">
-                                                    <span>{bid.publishDate} (Published)</span>
-                                                    <span>Deadline: {bid.deadline}</span>
+                                                    <span>{sanitizeDateValue(bid.publishDate) || bid.publishDate} (Published)</span>
+                                                    <span>Deadline: {sanitizeDateValue(bid.deadline) || bid.deadline}</span>
                                                 </div>
                                                 <div className="h-10 w-full bg-slate-100 rounded-xl flex shadow-inner border border-slate-200">
                                                     {/* Intake Lag Bar */}

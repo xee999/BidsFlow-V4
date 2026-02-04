@@ -1,3 +1,5 @@
+import { BidRecord, BidStage } from '../types';
+
 /**
  * Utility functions for BidsFlow
  */
@@ -139,4 +141,46 @@ export const sanitizeTimeValue = (timeStr: string | null | undefined): string =>
     }
 
     return '';
+};
+
+/**
+ * Calculates the integrity score of a bid based on its checklists and status.
+ */
+export const calculateIntegrity = (bid: BidRecord) => {
+    const weights = bid.integrityScoreBreakdown || { technicalWeight: 30, complianceWeight: 30, commercialWeight: 30, legalWeight: 10 };
+    const techItems = bid.technicalQualificationChecklist || [];
+    const compItems = bid.complianceChecklist || [];
+    const finItems = bid.financialFormats || [];
+    const techScore = techItems.length > 0 ? (techItems.filter(i => i.status === 'Complete').length / techItems.length) * weights.technicalWeight : weights.technicalWeight;
+    const compScore = compItems.length > 0 ? (compItems.filter(i => i.status === 'Complete').length / compItems.length) * weights.complianceWeight : weights.complianceWeight;
+    const commScore = finItems.length > 0 ? (finItems.filter(i => (i.unitPrice ?? 0) > 0).length / finItems.length) * weights.commercialWeight : 0;
+    const legalScore = (bid.managementApprovalStatus === 'Approved' ? 1 : 0) * weights.legalWeight;
+
+    const checklistScore = Math.round(techScore + compScore + commScore + legalScore);
+
+    // Stage Baseline Logic to ensure minimum progress per stage
+    const stageBaselines: Record<string, number> = {
+        [BidStage.INTAKE]: 5,
+        [BidStage.QUALIFICATION]: 20,
+        [BidStage.SOLUTIONING]: 40,
+        [BidStage.PRICING]: 60,
+        [BidStage.COMPLIANCE]: 80,
+        [BidStage.FINAL_REVIEW]: 90
+    };
+
+    const baseline = stageBaselines[bid.currentStage] || 0;
+
+    // Return the higher of the two to show progress even if checklists are empty
+    return Math.max(baseline, checklistScore);
+};
+
+/**
+ * Returns a color code based on the integrity score.
+ * Uses a subtle/pastel palette for better aesthetics.
+ */
+export const getIntegrityColor = (score: number): string => {
+    if (score >= 90) return '#86EFAC'; // Green-300 (Subtle)
+    if (score >= 60) return '#FCD34D'; // Amber-300 (Subtle)
+    if (score >= 30) return '#FDBA74'; // Orange-300 (Subtle)
+    return '#FCA5A5'; // Red-300 (Subtle)
 };

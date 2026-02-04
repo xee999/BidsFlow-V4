@@ -5,6 +5,7 @@ import { BidRecord, BidStatus, BidStage } from '../types.ts';
 import { SOLUTION_OPTIONS } from '../constants.tsx';
 import { clsx } from 'clsx';
 import { bidApi } from '../services/api.ts';
+import { sanitizeDateValue } from '../services/utils';
 
 interface DeleteBidsViewProps {
     bids: BidRecord[];
@@ -366,7 +367,7 @@ const DeleteBidsView: React.FC<DeleteBidsViewProps> = ({ bids, onDeleteSuccess }
                                         <Building2 size={12} /> {bid.customerName || 'Unknown Customer'}
                                     </span>
                                     <span className="flex items-center gap-1.5">
-                                        <Calendar size={12} /> {bid.deadline || 'No Date'}
+                                        <Calendar size={12} /> {sanitizeDateValue(bid.deadline) || bid.deadline || 'No Date'}
                                     </span>
                                     <span className="text-slate-200 opacity-50">ID: {bid.id || 'N/A'}</span>
                                 </div>

@@ -58,20 +58,31 @@ const ActivityLogView: React.FC<ActivityLogViewProps> = ({ auditTrail }) => {
     };
 
     const filteredAuditTrail = useMemo(() => {
-        return auditTrail.filter(log => {
-            const matchesUser = userFilter === 'all' || log.userName === userFilter;
-            const matchesAction = actionFilter === 'all' || log.action === actionFilter;
-            const matchesChangeType = changeTypeFilter === 'all' || log.changeType === changeTypeFilter;
-            const matchesDateRange = isWithinDateRange(log.id);
-            const matchesSearch = searchQuery === '' ||
-                log.userName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                log.target.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                log.subText.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                (log.projectName && log.projectName.toLowerCase().includes(searchQuery.toLowerCase()));
-            return matchesUser && matchesAction && matchesChangeType && matchesSearch && matchesDateRange;
-        });
+        return auditTrail
+            .filter(log => {
+                const matchesUser = userFilter === 'all' || log.userName === userFilter;
+                const matchesAction = actionFilter === 'all' || log.action === actionFilter;
+                const matchesChangeType = changeTypeFilter === 'all' || log.changeType === changeTypeFilter;
+                const matchesDateRange = isWithinDateRange(log.id);
+                const matchesSearch = searchQuery === '' ||
+                    log.userName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    log.target.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    log.subText.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (log.projectName && log.projectName.toLowerCase().includes(searchQuery.toLowerCase()));
+                return matchesUser && matchesAction && matchesChangeType && matchesSearch && matchesDateRange;
+            })
+            .sort((a, b) => {
+                // Sort chronologically - newest first
+                const dateA = new Date(a.timestamp).getTime();
+                const dateB = new Date(b.timestamp).getTime();
+                // Handle invalid dates by falling back to ID timestamp
+                const validA = !isNaN(dateA) ? dateA : parseInt(a.id.split('_')[1]) || 0;
+                const validB = !isNaN(dateB) ? dateB : parseInt(b.id.split('_')[1]) || 0;
+                return validB - validA; // Descending order (newest first)
+            });
     }, [auditTrail, userFilter, actionFilter, changeTypeFilter, searchQuery, dateRangeFilter]);
+
 
     const getRoleDisplayName = (role: string) => {
         return USER_ROLE_LABELS[role as UserRole] || role;

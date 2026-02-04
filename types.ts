@@ -140,6 +140,24 @@ export interface ActivityLog {
   newValue?: string;
 }
 
+export interface BidNote {
+  id: string;
+  content: string;
+  color: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  date: string;
+  type: 'note' | 'event' | 'reminder';
+  color: string;
+  description?: string;
+  createdBy: string;
+}
+
 export interface StrategicRiskReport {
   risks: { category: string; description: string; severity: RiskLevel }[];
   mitigations: string[];
@@ -218,6 +236,7 @@ export interface BidRecord {
     legalWeight: number;
   };
   phaseTargets?: Record<string, number>; // Calculated target days per phase
+  notes?: BidNote[];
 }
 
 // User Role Types
@@ -297,6 +316,7 @@ export type AppSection =
   | 'approvals'
   | 'reports'
   | 'risk-watch'
+  | 'calendar'
   | 'settings'
   | 'delete-manager';
 
@@ -310,6 +330,7 @@ export const APP_SECTIONS: { id: AppSection; label: string }[] = [
   { id: 'approvals', label: 'Approvals' },
   { id: 'reports', label: 'Reports' },
   { id: 'risk-watch', label: 'Risk Watch' },
+  { id: 'calendar', label: 'Calendar' },
   { id: 'settings', label: 'Settings' },
   { id: 'delete-manager', label: 'Delete Manager' },
 ];
@@ -342,6 +363,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
     'approvals': 'edit',
     'reports': 'edit',
     'risk-watch': 'edit',
+    'calendar': 'edit',
     'settings': 'edit',
     'delete-manager': 'edit',
   },
@@ -354,6 +376,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
     'approvals': 'edit',
     'reports': 'view',
     'risk-watch': 'view',
+    'calendar': 'edit',
     'settings': 'none',
     'delete-manager': 'none',
   },
@@ -366,6 +389,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
     'approvals': 'view',
     'reports': 'view',
     'risk-watch': 'view',
+    'calendar': 'view',
     'settings': 'none',
     'delete-manager': 'none',
   },

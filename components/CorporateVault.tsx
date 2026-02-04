@@ -95,10 +95,40 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; us
     }
   };
 
+  const handleSetViewingAsset = async (asset: TechnicalDocument | null) => {
+    if (!asset) {
+      setViewingAsset(null);
+      return;
+    }
+
+    // If we already have fileData, just show it
+    if (asset.fileData) {
+      setViewingAsset(asset);
+      return;
+    }
+
+    // Fetch full detail with fileData
+    setIsIndexing(true); // Re-use indexing state as a loading spinner
+    try {
+      const fullAsset = await vaultApi.getById(asset.id);
+      // Update local state so it's cached
+      setAssets((prev: any) => prev.map((a: any) => a.id === asset.id ? fullAsset : a));
+      setViewingAsset(fullAsset);
+    } catch (err) {
+      console.error("Failed to fetch full asset details", err);
+      // Fallback to what we have
+      setViewingAsset(asset);
+    } finally {
+      setIsIndexing(false);
+    }
+  };
+
   const deleteAsset = (id: string) => {
     if (confirm("Remove this asset from the library?")) {
       setAssets((prev: any) => prev.filter((a: any) => a.id !== id));
       if (viewingAsset?.id === id) setViewingAsset(null);
+      // Call API
+      vaultApi.remove(id).catch(err => console.error("Failed to delete asset from server", err));
     }
   };
 
@@ -251,7 +281,7 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; us
                 return (
                   <div
                     key={asset.id}
-                    onClick={() => setViewingAsset(asset)}
+                    onClick={() => handleSetViewingAsset(asset)}
                     className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:border-slate-300 transition-all group relative flex flex-col cursor-pointer animate-in fade-in slide-in-from-bottom-2 h-full"
                   >
                     <div className="flex items-start justify-between mb-4">

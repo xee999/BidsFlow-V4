@@ -2,6 +2,7 @@ import React from 'react';
 import { Target, Briefcase, Activity, ChevronRight, ChevronLeft } from 'lucide-react';
 import { clsx } from 'clsx';
 import { BidRecord, BidStage } from '../../types';
+import { sanitizeDateValue } from '../../services/utils';
 
 interface StatBoxProps {
     label: string;
@@ -73,7 +74,7 @@ const BidLifecycleSidebar: React.FC<BidLifecycleSidebarProps> = ({
                             )}>
                                 {remainingDays}
                             </div>
-                            <p className="text-[8px] font-bold text-slate-500 uppercase">{bid.deadline}</p>
+                            <p className="text-[8px] font-bold text-slate-500 uppercase">{sanitizeDateValue(bid.deadline) || bid.deadline}</p>
                         </div>
                         <StatBox label={bid.tcvExclTax ? "Bid Value" : "Est. Value"} value={`PKR ${((bid.tcvExclTax || bid.estimatedValue) / 1000000).toFixed(1)}M`} color="text-white" />
                     </div>

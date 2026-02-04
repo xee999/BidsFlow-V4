@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { 
-  AlertTriangle, 
-  ShieldAlert, 
-  ChevronRight, 
-  Zap, 
-  Clock, 
+import {
+  AlertTriangle,
+  ShieldAlert,
+  ChevronRight,
+  Zap,
+  Clock,
   CreditCard,
   Target,
   FileText,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { BidRecord, RiskLevel, BidRisk } from '../types.ts';
 import { clsx } from 'clsx';
+import { sanitizeDateValue } from '../services/utils';
 
 interface RiskWatchViewProps {
   bids: BidRecord[];
@@ -44,28 +45,28 @@ const RiskWatchView: React.FC<RiskWatchViewProps> = ({ bids, onViewBid }) => {
   };
 
   const filterConfigs = [
-    { 
-      id: RiskLevel.HIGH, 
-      label: 'High / Critical', 
-      count: counts[RiskLevel.HIGH], 
+    {
+      id: RiskLevel.HIGH,
+      label: 'High / Critical',
+      count: counts[RiskLevel.HIGH],
       icon: <ShieldAlert size={18} />,
       activeClass: "bg-[#D32F2F] text-white border-[#D32F2F] shadow-lg shadow-red-100",
       inactiveClass: "text-red-500 bg-red-50/50 border-red-100 hover:bg-red-50",
       glow: "bg-red-500"
     },
-    { 
-      id: RiskLevel.MEDIUM, 
-      label: 'Medium Risk', 
-      count: counts[RiskLevel.MEDIUM], 
+    {
+      id: RiskLevel.MEDIUM,
+      label: 'Medium Risk',
+      count: counts[RiskLevel.MEDIUM],
       icon: <AlertCircle size={18} />,
       activeClass: "bg-amber-500 text-white border-amber-500 shadow-lg shadow-amber-100",
       inactiveClass: "text-amber-600 bg-amber-50/50 border-amber-100 hover:bg-amber-50",
       glow: "bg-amber-500"
     },
-    { 
-      id: RiskLevel.LOW, 
-      label: 'Low Risk', 
-      count: counts[RiskLevel.LOW], 
+    {
+      id: RiskLevel.LOW,
+      label: 'Low Risk',
+      count: counts[RiskLevel.LOW],
       icon: <ShieldCheck size={18} />,
       activeClass: "bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-100",
       inactiveClass: "text-emerald-600 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-50",
@@ -111,7 +112,7 @@ const RiskWatchView: React.FC<RiskWatchViewProps> = ({ bids, onViewBid }) => {
                 <p className="text-sm font-bold text-slate-400 mb-8 uppercase tracking-wide">{bid.customerName}</p>
                 <div className="space-y-4 mb-10">
                   <div className="flex items-center gap-3 text-xs font-bold text-slate-600"><div className="p-2 bg-white rounded-lg shadow-sm"><CreditCard size={14} className="text-slate-400" /></div><span>{bid.currency} {(bid.estimatedValue / 1000000).toFixed(1)}M Total</span></div>
-                  <div className="flex items-center gap-3 text-xs font-bold text-slate-600"><div className="p-2 bg-white rounded-lg shadow-sm"><Clock size={14} className="text-slate-400" /></div><span className={effectiveRisk === RiskLevel.HIGH ? "text-red-500 font-black" : ""}>Deadline: {bid.deadline}</span></div>
+                  <div className="flex items-center gap-3 text-xs font-bold text-slate-600"><div className="p-2 bg-white rounded-lg shadow-sm"><Clock size={14} className="text-slate-400" /></div><span className={effectiveRisk === RiskLevel.HIGH ? "text-red-500 font-black" : ""}>Deadline: {sanitizeDateValue(bid.deadline) || bid.deadline}</span></div>
                   <div className="flex items-center gap-3 text-xs font-bold text-slate-600"><div className="p-2 bg-white rounded-lg shadow-sm"><Target size={14} className="text-slate-400" /></div><span>Manager: {bid.jbcName}</span></div>
                 </div>
                 <button onClick={() => onViewBid(bid.id)} className="w-full flex items-center justify-center gap-2 px-8 py-4 bg-white border border-slate-200 rounded-2xl text-xs font-black uppercase tracking-widest text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all shadow-sm active:scale-95">Manage Risk Profile <ChevronRight size={14} /></button>
@@ -122,8 +123,8 @@ const RiskWatchView: React.FC<RiskWatchViewProps> = ({ bids, onViewBid }) => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {combinedRisks.map((risk, idx) => (
                       <div key={idx} className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 flex gap-4 transition-all hover:border-slate-300 hover:bg-white hover:shadow-lg">
-                         <div className="mt-1"><div className={clsx("w-2 h-2 rounded-full", risk.severity === RiskLevel.HIGH ? "bg-red-500 shadow-[0_0_8px_rgba(211,47,47,0.5)]" : risk.severity === RiskLevel.MEDIUM ? "bg-amber-500" : "bg-emerald-500")}></div></div>
-                         <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black text-slate-400 uppercase">{risk.category}</span>{(bid.disqualifyingFactors || []).includes(risk.description) && (<span className="bg-red-50 text-red-600 text-[8px] font-black px-1.5 py-0.5 rounded uppercase border border-red-100">Disqualifier</span>)}</div><div className="text-sm font-bold text-slate-700 leading-snug">{risk.description}</div></div>
+                        <div className="mt-1"><div className={clsx("w-2 h-2 rounded-full", risk.severity === RiskLevel.HIGH ? "bg-red-500 shadow-[0_0_8px_rgba(211,47,47,0.5)]" : risk.severity === RiskLevel.MEDIUM ? "bg-amber-500" : "bg-emerald-500")}></div></div>
+                        <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black text-slate-400 uppercase">{risk.category}</span>{(bid.disqualifyingFactors || []).includes(risk.description) && (<span className="bg-red-50 text-red-600 text-[8px] font-black px-1.5 py-0.5 rounded uppercase border border-red-100">Disqualifier</span>)}</div><div className="text-sm font-bold text-slate-700 leading-snug">{risk.description}</div></div>
                       </div>
                     ))}
                     {combinedRisks.length === 0 && (<div className="col-span-2 p-10 border-2 border-dashed border-slate-100 rounded-[2.5rem] text-center flex flex-col items-center justify-center gap-2"><div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-200 mb-2"><FileText size={24} /></div><p className="text-xs text-slate-400 italic font-bold">No Risk Factors Reported Yet</p></div>)}
@@ -139,7 +140,8 @@ const RiskWatchView: React.FC<RiskWatchViewProps> = ({ bids, onViewBid }) => {
                 </div>
               </div>
             </div>
-          )})}
+          )
+        })}
         {filteredBids.length === 0 && (<div className="py-32 flex flex-col items-center justify-center text-slate-400 bg-white rounded-[40px] border-2 border-dashed border-slate-100"><div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6"><ShieldCheck className="text-slate-200" size={40} /></div><p className="text-2xl font-black text-slate-800">No {selectedRisk !== 'All' ? selectedRisk : ''} Priority Bids</p></div>)}
       </div>
     </div>

@@ -205,12 +205,41 @@ app.use('/api/roles', checkDbConnection, rolesRoutes);
 // =============================================================================
 // Bids Routes
 // =============================================================================
+// NOTE: The GET /api/bids endpoint returns metadata only (names and details)
+// but excludes actual document fields to avoid Cloud Run's 32MB response limit.
+// Use GET /api/bids/:id to fetch the full bid including all documents.
 
 app.get('/api/bids', checkDbConnection, async (req, res) => {
     try {
-        const bids = await Bid.find().sort({ createdAt: -1 });
+        console.log('[/api/bids] Fetching bid metadata summaries...');
+
+        const bids = await Bid.find()
+            .select('-technicalDocuments -vendorQuotations -financialFormats -proposalSections -technicalQualificationChecklist -complianceChecklist')
+            .sort({ createdAt: -1 })
+            .maxTimeMS(5000)
+            .lean();
+
+        console.log('[/api/bids] Found', bids.length, 'bids');
         res.json(bids);
     } catch (err) {
+        console.error('[/api/bids] Error fetching bids:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Fetch full bid details including documents for a specific bid
+app.get('/api/bids/:id', checkDbConnection, async (req, res) => {
+    try {
+        console.log(`[/api/bids/${req.params.id}] Fetching full bid details...`);
+        const bid = await Bid.findOne({ id: req.params.id }).lean();
+
+        if (!bid) {
+            return res.status(404).json({ error: 'Bid not found' });
+        }
+
+        res.json(bid);
+    } catch (err) {
+        console.error(`[/api/bids/${req.params.id}] Error fetching bid details:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -236,6 +265,7 @@ app.post('/api/bids', checkDbConnection, validateBid, async (req, res) => {
         await bid.save();
         res.status(201).json(bid);
     } catch (err) {
+        console.error('Error creating bid:', err);
         res.status(400).json({ error: err.message });
     }
 });
@@ -246,6 +276,7 @@ app.put('/api/bids/:id', checkDbConnection, async (req, res) => {
         if (!bid) return res.status(404).json({ error: 'Bid not found' });
         res.json(bid);
     } catch (err) {
+        console.error('Error updating bid:', err);
         res.status(400).json({ error: err.message });
     }
 });
@@ -266,9 +297,22 @@ app.delete('/api/bids/:id', checkDbConnection, async (req, res) => {
 
 app.get('/api/vault', checkDbConnection, async (req, res) => {
     try {
-        const assets = await VaultAsset.find().sort({ createdAt: -1 });
+        // Exclude large fileData to stay under 32MB list limit
+        const assets = await VaultAsset.find().select('-fileData').sort({ createdAt: -1 }).lean();
         res.json(assets);
     } catch (err) {
+        console.error('Error fetching vault assets:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/vault/:id', checkDbConnection, async (req, res) => {
+    try {
+        const asset = await VaultAsset.findOne({ id: req.params.id }).lean();
+        if (!asset) return res.status(404).json({ error: 'Asset not found' });
+        res.json(asset);
+    } catch (err) {
+        console.error('Error fetching vault asset details:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -326,6 +370,7 @@ app.get('/api/audit', checkDbConnection, async (req, res) => {
 
         res.json(enrichedLogs);
     } catch (err) {
+        console.error('Error fetching audit logs:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -337,6 +382,42 @@ app.post('/api/audit', checkDbConnection, async (req, res) => {
         res.status(201).json(log);
     } catch (err) {
         res.status(400).json({ error: err.message });
+    }
+});
+
+// =============================================================================
+// Calendar Events Routes
+// =============================================================================
+
+import { CalendarEvent } from './models/CalendarEvent.js';
+
+app.get('/api/calendar-events', checkDbConnection, async (req, res) => {
+    try {
+        const events = await CalendarEvent.find().sort({ date: 1 }).lean();
+        res.json(events);
+    } catch (err) {
+        console.error('Error fetching calendar events:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/calendar-events', checkDbConnection, async (req, res) => {
+    try {
+        const event = new CalendarEvent(req.body);
+        await event.save();
+        res.status(201).json(event);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+app.delete('/api/calendar-events/:id', checkDbConnection, async (req, res) => {
+    try {
+        const event = await CalendarEvent.findOneAndDelete({ id: req.params.id });
+        if (!event) return res.status(404).json({ error: 'Event not found' });
+        res.json({ message: 'Event deleted' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 

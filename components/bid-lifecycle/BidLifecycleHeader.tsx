@@ -40,7 +40,7 @@ const BidLifecycleHeader: React.FC<BidLifecycleHeaderProps> = ({
 
     return (
         <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between shadow-sm z-20 shrink-0">
-            <div className="flex items-center gap-6 overflow-hidden">
+            <div className="flex items-center gap-6 min-w-0">
                 <button
                     onClick={onClose}
                     className="w-10 h-10 bg-[#D32F2F] text-white flex items-center justify-center rounded-full transition-all hover:bg-red-700 shadow-md active:scale-90 shrink-0"
@@ -49,7 +49,7 @@ const BidLifecycleHeader: React.FC<BidLifecycleHeaderProps> = ({
                     <ArrowLeft size={20} />
                 </button>
                 <div className="h-8 w-px bg-slate-100 shrink-0"></div>
-                <nav ref={navRef} className="flex items-center gap-1 overflow-x-auto no-scrollbar max-w-2xl shrink-0">
+                <nav ref={navRef} className="flex items-center gap-1 overflow-x-auto no-scrollbar max-w-2xl min-w-0">
                     {stagesOrder.map((stage, idx) => {
                         const isViewing = viewingStage === stage;
                         const isDone = currentOfficialIndex > idx;
