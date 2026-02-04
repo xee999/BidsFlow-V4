@@ -86,7 +86,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdate
     const bidsByDate = useMemo(() => {
         const map: Record<string, BidRecord[]> = {};
         bids.forEach(bid => {
-            const date = bid.deadline?.split('T')[0];
+            const date = sanitizeDateValue(bid.deadline);
             if (date) {
                 if (!map[date]) map[date] = [];
                 map[date].push(bid);
