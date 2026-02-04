@@ -108,11 +108,17 @@ export const sanitizeDateValue = (dateStr: string | null | undefined): string =>
         return dateStr;
     }
 
-    // Try to parse it
+    // Handle ISO strings (e.g. 2026-02-05T00:00:00Z) by string splitting to avoid timezone shift
+    // This assumes the intention of "2026-02-05..." is always 5th Feb regardless of 'T' or 'Z'
+    if (dateStr.includes('T') && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+        return dateStr.split('T')[0];
+    }
+
+    // Try to parse natural language (e.g. "Oct 05, 2026")
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return '';
 
-    // Use local time components to avoid UTC shift
+    // Use local time components to avoid UTC shift for natural language inputs
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');

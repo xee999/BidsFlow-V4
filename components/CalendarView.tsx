@@ -29,6 +29,12 @@ interface CalendarViewProps {
 }
 
 const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdateBid, onViewBid }) => {
+    // DEBUG: Log received bids for calendar
+    React.useEffect(() => {
+        console.log("CalendarView mounted. Received bids:", bids.length);
+        console.log("Sample Output Dates:", bids.slice(0, 3).map(b => `${b.projectName}: ${b.deadline}`));
+    }, [bids]);
+
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedBid, setSelectedBid] = useState<BidRecord | null>(null);
     const [showNotePad, setShowNotePad] = useState<{ bidId: string, note?: BidNote } | null>(null);
