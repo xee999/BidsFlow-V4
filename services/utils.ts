@@ -151,8 +151,8 @@ export const calculateIntegrity = (bid: BidRecord) => {
     const techItems = bid.technicalQualificationChecklist || [];
     const compItems = bid.complianceChecklist || [];
     const finItems = bid.financialFormats || [];
-    const techScore = techItems.length > 0 ? (techItems.filter(i => i.status === 'Complete').length / techItems.length) * weights.technicalWeight : weights.technicalWeight;
-    const compScore = compItems.length > 0 ? (compItems.filter(i => i.status === 'Complete').length / compItems.length) * weights.complianceWeight : weights.complianceWeight;
+    const techScore = techItems.length > 0 ? (techItems.filter(i => i.status === 'Complete').length / techItems.length) * weights.technicalWeight : 0;
+    const compScore = compItems.length > 0 ? (compItems.filter(i => i.status === 'Complete').length / compItems.length) * weights.complianceWeight : 0;
     const commScore = finItems.length > 0 ? (finItems.filter(i => (i.unitPrice ?? 0) > 0).length / finItems.length) * weights.commercialWeight : 0;
     const legalScore = (bid.managementApprovalStatus === 'Approved' ? 1 : 0) * weights.legalWeight;
 
