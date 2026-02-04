@@ -185,7 +185,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
     });
   };
 
-  const handleInitiate = (e: React.FormEvent) => {
+  const handleInitiate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
     const newErrors: Record<string, boolean> = {};
