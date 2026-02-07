@@ -25,6 +25,7 @@ import { authService, userService } from './services/authService.ts';
 import { auditActions, loadAuditLogs, saveAuditLogs } from './services/auditService.ts';
 import { PermissionProvider, PermissionGuard } from './components/PermissionGuard.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
+import { NotificationManager } from './components/NotificationManager.tsx';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -33,6 +34,7 @@ const App: React.FC = () => {
   const [bids, setBids] = useState<BidRecord[]>([]);
   const [vaultAssets, setVaultAssets] = useState<TechnicalDocument[]>([]);
   const [auditTrail, setAuditTrail] = useState<ActivityLog[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<any[]>([]); // Calendar events
   const [viewingBidId, setViewingBidId] = useState<string | null>(null);
   const [showIntake, setShowIntake] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -72,14 +74,17 @@ const App: React.FC = () => {
     const loadData = async () => {
       setIsLoadingData(true);
       try {
-        const [fetchedBids, fetchedVault, fetchedAudit] = await Promise.all([
+        const [fetchedBids, fetchedVault, fetchedAudit, fetchedEvents] = await Promise.all([
           bidApi.getAll(),
           vaultApi.getAll(),
-          auditApi.getAll()
+          auditApi.getAll(),
+          // Fetch calendar events - assume api.ts will support this or fetch manually if not
+          fetch('/api/calendar-events').then(res => res.ok ? res.json() : [])
         ]);
 
         setBids(fetchedBids);
         setVaultAssets(fetchedVault);
+        setCalendarEvents(fetchedEvents);
 
         // Merge backend audit logs with localStorage (localStorage as fallback)
         const localLogs = loadAuditLogs();
@@ -96,6 +101,7 @@ const App: React.FC = () => {
         console.error('Error loading data:', err);
         setBids([]);
         setVaultAssets([]);
+        setCalendarEvents([]);
         // Load from localStorage as fallback
         setAuditTrail(loadAuditLogs());
       } finally {
@@ -271,6 +277,7 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <PermissionProvider role={currentUser.role} customPermissions={currentUser.permissions}>
+        <NotificationManager bids={bids} events={calendarEvents} onNavigateToBid={handleSetViewingBidId} />
         <div className="flex bg-[#F1F5F9] min-h-screen overflow-x-hidden">
           <Sidebar
             activeTab={activeTab}
