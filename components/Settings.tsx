@@ -1,8 +1,9 @@
 
 import React, { useState, useMemo, useRef } from 'react';
-import { Activity, ChevronDown, Search, Filter, User, Zap, Sparkles, CheckCircle2, AlertCircle, Settings as SettingsIcon, Clock, FileText, ShieldAlert, ArrowUpRight, Users, Shield, Briefcase, Building2, Star, Rocket, Crown, Upload, Lock, Eye, EyeOff, Download, Calendar, Loader2 } from 'lucide-react';
-import { BidRecord, ActivityLog, User as UserType, UserRole, USER_ROLE_LABELS, AvatarIcon, AuditChangeType } from '../types.ts';
+import { Activity, ChevronDown, Search, Filter, User, Zap, Sparkles, CheckCircle2, AlertCircle, Settings as SettingsIcon, Clock, FileText, ShieldAlert, ArrowUpRight, Users, Shield, Briefcase, Building2, Star, Rocket, Crown, Upload, Lock, Eye, EyeOff, Download, Calendar, Loader2, Bell } from 'lucide-react';
+import { BidRecord, ActivityLog, User as UserType, UserRole, USER_ROLE_LABELS, AvatarIcon, AuditChangeType, NotificationPreferences, DEFAULT_NOTIFICATION_PREFERENCES } from '../types.ts';
 import { clsx } from 'clsx';
+import NotificationSettings from './NotificationSettings';
 // Removed UserManagement and RoleManagement imports - moved to dedicated admin panel
 
 
@@ -11,7 +12,7 @@ interface SettingsProps {
     onUpdateUser: (user: UserType) => void;
 }
 
-type SettingsSection = 'user-profile';
+type SettingsSection = 'user-profile' | 'notifications';
 
 
 
@@ -145,9 +146,10 @@ const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateUser }) => {
         return avatarContent;
     };
 
-    // Sidebar items - Only User Profile for all users
+    // Sidebar items - User Profile and Notifications
     const sidebarItems = [
         { id: 'user-profile' as const, label: 'User Profile', icon: <User size={18} />, description: 'Your account settings' },
+        { id: 'notifications' as const, label: 'Notifications', icon: <Bell size={18} />, description: 'Alert preferences' },
     ];
 
     return (
@@ -424,6 +426,26 @@ const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateUser }) => {
 
 
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Notifications Settings Section */}
+                    {activeSection === 'notifications' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-in">
+                            <div className="p-6 border-b border-slate-100 bg-slate-50/30">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2.5 bg-[#D32F2F]/10 rounded-xl">
+                                        <Bell size={20} className="text-[#D32F2F]" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-lg font-black text-slate-900 tracking-tight">Notification Preferences</h2>
+                                        <p className="text-xs text-slate-500 font-medium">Configure how and when you receive alerts</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-6">
+                                <NotificationSettings />
                             </div>
                         </div>
                     )}

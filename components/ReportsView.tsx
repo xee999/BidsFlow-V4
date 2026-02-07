@@ -127,7 +127,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
     // Detect bottleneck stage
     const stageTotals: Record<string, number> = {};
     bids.forEach(b => {
-      Object.entries(b.daysInStages).forEach(([stage, days]: [string, any]) => {
+      Object.entries(b.daysInStages || {}).forEach(([stage, days]: [string, any]) => {
         stageTotals[stage] = (stageTotals[stage] || 0) + (days as number);
       });
     });
@@ -500,7 +500,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
                         <td className="px-12 py-10 max-w-xs"><div className="font-black text-slate-900 leading-tight text-lg group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div><div className="text-[11px] text-slate-400 font-bold uppercase mt-1 tracking-tight">{bid.customerName}</div></td>
                         <td className="px-12 py-10">
                           <div className="flex items-center w-full min-w-[500px] h-14 bg-slate-100 rounded-2xl p-1.5 border border-slate-200 relative shadow-inner">
-                            {Object.entries(bid.daysInStages).map(([stage, days]: [string, any], idx, arr) => {
+                            {Object.entries(bid.daysInStages || {}).map(([stage, days]: [string, any], idx, arr) => {
                               // Find phase dates from history
                               const historyIdx = bid.stageHistory?.findIndex(h => h.stage === (stage as any));
                               const phaseStart = bid.stageHistory?.[historyIdx]?.timestamp || bid.receivedDate;

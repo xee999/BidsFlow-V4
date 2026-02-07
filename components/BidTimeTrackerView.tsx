@@ -141,7 +141,7 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                                 const teamTime = getDaysBetween(bid.receivedDate, bid.deadline);
                                 const totalWindow = getDaysBetween(bid.publishDate, bid.deadline) || 1;
 
-                                const currentPhaseDays = bid.daysInStages[bid.currentStage] || 1;
+                                const currentPhaseDays = (bid.daysInStages?.[bid.currentStage] as number) || 1;
                                 const targetDays = getPhaseTargetDays(teamTime, bid.complexity, bid.currentStage);
                                 const variance = currentPhaseDays - targetDays;
                                 const isOverBudget = variance > 0;
@@ -197,7 +197,7 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
 
                                                     {/* Execution Horizon (Phases) */}
                                                     <div className="h-full flex-1 flex">
-                                                        {Object.entries(bid.daysInStages).map(([stage, days]: [string, any]) => {
+                                                        {Object.entries(bid.daysInStages || {}).map(([stage, days]: [string, any]) => {
                                                             const pTarget = getPhaseTargetDays(teamTime, bid.complexity, stage);
                                                             const pVariance = (days as number) - pTarget;
                                                             return (

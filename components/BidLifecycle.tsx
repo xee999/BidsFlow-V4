@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   ArrowLeft, ChevronRight, ChevronLeft, ShieldAlert, FileUp, Zap, Info,
@@ -23,6 +22,8 @@ import BidLifecycleHeader from './bid-lifecycle/BidLifecycleHeader';
 import NoBidModal from './bid-lifecycle/NoBidModal';
 import OutcomeModal from './bid-lifecycle/OutcomeModal';
 import DeleteAssetModal from './bid-lifecycle/DeleteAssetModal';
+import MentionInput from './MentionInput';
+import { userService } from '../services/authService.ts';
 
 interface BidLifecycleProps {
   bid: BidRecord;
@@ -99,7 +100,16 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
 
   const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [newNoteContent, setNewNoteContent] = useState('');
+  const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
   const [isAddingNote, setIsAddingNote] = useState(false);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+
+  // Fetch users for @mention dropdown
+  useEffect(() => {
+    userService.getAll()
+      .then(users => setAllUsers(users))
+      .catch(err => console.warn('Failed to load users for mentions:', err));
+  }, []);
 
   const navRef = useRef<HTMLDivElement>(null);
   const refs = {
@@ -1438,18 +1448,41 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
               {/* Add Note Form */}
               {isAddingNote && (
                 <div className="mb-6 p-5 bg-amber-50 border border-amber-200 rounded-2xl">
-                  <textarea
-                    autoFocus
+                  <MentionInput
                     value={newNoteContent}
-                    onChange={(e) => setNewNoteContent(e.target.value)}
-                    placeholder="Write your note here..."
-                    className="w-full bg-white/80 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 font-medium resize-none h-24 outline-none focus:border-amber-400 transition-all"
+                    onChange={(value, userIds) => {
+                      setNewNoteContent(value);
+                      setMentionedUserIds(userIds);
+                    }}
+                    users={allUsers}
+                    placeholder="Write your note here... Use @ to mention team members"
+                    autoFocus
+                    rows={4}
+                    className="w-full bg-white/80 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 font-medium h-24 focus:border-amber-400 transition-all"
+                    onSubmit={() => {
+                      if (newNoteContent.trim() && currentUser) {
+                        const newNote = {
+                          id: `note-${Date.now()}`,
+                          content: newNoteContent.trim(),
+                          color: '#FEF3C7',
+                          createdAt: new Date().toISOString(),
+                          createdBy: currentUser.name,
+                          mentionedUserIds: mentionedUserIds
+                        };
+                        const updatedNotes = [...(bid.notes || []), newNote];
+                        onUpdate({ ...bid, notes: updatedNotes });
+                        setNewNoteContent('');
+                        setMentionedUserIds([]);
+                        setIsAddingNote(false);
+                      }
+                    }}
                   />
                   <div className="flex justify-end gap-3 mt-3">
                     <button
                       onClick={() => {
                         setIsAddingNote(false);
                         setNewNoteContent('');
+                        setMentionedUserIds([]);
                       }}
                       className="px-4 py-2 text-slate-500 text-xs font-bold uppercase hover:text-slate-700 transition-all"
                     >
@@ -1463,11 +1496,13 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                             content: newNoteContent.trim(),
                             color: '#FEF3C7',
                             createdAt: new Date().toISOString(),
-                            createdBy: currentUser.name
+                            createdBy: currentUser.name,
+                            mentionedUserIds: mentionedUserIds
                           };
                           const updatedNotes = [...(bid.notes || []), newNote];
                           onUpdate({ ...bid, notes: updatedNotes });
                           setNewNoteContent('');
+                          setMentionedUserIds([]);
                           setIsAddingNote(false);
                         }
                       }}
@@ -1478,6 +1513,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                   </div>
                 </div>
               )}
+
 
               {/* Notes Grid */}
               {bid.notes && bid.notes.length > 0 ? (

@@ -9,8 +9,8 @@ router.use(authMiddleware);
 
 import { Role } from '../models/Role.js';
 
-// Get all users - requires SUPER_ADMIN
-router.get('/', roleCheck(['SUPER_ADMIN']), async (req, res) => {
+// Get all users - Allow any authenticated user to fetch the list for mentions
+router.get('/', async (req, res) => {
     try {
         const users = await User.find({}, '-password').lean();
         // Enrich with role names

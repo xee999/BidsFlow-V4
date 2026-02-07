@@ -146,6 +146,7 @@ export interface BidNote {
   color: string;
   createdAt: string;
   createdBy: string;
+  mentionedUserIds?: string[]; // User IDs tagged with @mention
 }
 
 export interface CalendarEvent {
@@ -157,6 +158,142 @@ export interface CalendarEvent {
   description?: string;
   createdBy: string;
 }
+
+// ============================================
+// NOTIFICATION ENGINE TYPES
+// ============================================
+
+export enum NotificationType {
+  // Deadline-related
+  DEADLINE_24H = 'deadline_24h',
+  DEADLINE_12H = 'deadline_12h',
+  DEADLINE_2H = 'deadline_2h',
+  DEADLINE_1H = 'deadline_1h',
+
+  // Calendar events
+  EVENT_TODAY = 'event_today',
+  REMINDER_DUE = 'reminder_due',
+
+  // Pre-bid meetings
+  MEETING_TOMORROW = 'meeting_tomorrow',
+  MEETING_2H = 'meeting_2h',
+
+  // Stage tracking
+  STAGE_TRANSITION = 'stage_transition',
+  BID_STALLED = 'bid_stalled',
+
+  // General
+  NEW_BID = 'new_bid',
+  STATUS_CHANGE = 'status_change',
+  DOCUMENT_UPLOADED = 'document_uploaded',
+  NOTE_ADDED = 'note_added',
+  MENTION = 'mention'  // @mention in notes
+}
+
+export type NotificationPriority = 'critical' | 'high' | 'medium' | 'low';
+
+export interface BidNotification {
+  id: string;
+  userId: string;                    // Target user (or 'all' for broadcast)
+  type: NotificationType;
+  priority: NotificationPriority;
+
+  // Content
+  title: string;
+  message: string;
+
+  // Related entities
+  bidId?: string;
+  bidName?: string;
+  eventId?: string;
+  noteId?: string;  // For scroll-to-highlight on note mentions
+
+  // State
+  isRead: boolean;
+  isDismissed: boolean;
+  browserNotificationSent: boolean;
+
+  // Timing
+  createdAt: string;
+  scheduledFor?: string;             // For future notifications
+  expiresAt?: string;                // Auto-dismiss after this time
+}
+
+export interface NotificationPreferences {
+  userId: string;
+
+  // Master toggle
+  browserNotificationsEnabled: boolean;
+
+  // Deadline alerts
+  deadlineAlerts: {
+    enabled: boolean;
+    intervals: ('24h' | '12h' | '2h' | '1h')[];
+    browserPopup: boolean;
+  };
+
+  // Calendar events
+  calendarAlerts: {
+    enabled: boolean;
+    intervals: ('1d' | '1h' | '15m' | 'at_time')[];
+    browserPopup: boolean;
+  };
+
+  // Pre-bid meetings
+  meetingAlerts: {
+    enabled: boolean;
+    intervals: ('1d' | '2h')[];
+    browserPopup: boolean;
+  };
+
+  // Stage progress
+  stageAlerts: {
+    transitions: boolean;
+    stalledAlerts: boolean;
+    stalledThresholdDays: number;
+    browserPopup: boolean;
+  };
+
+  // Informational
+  infoAlerts: {
+    newBids: boolean;
+    statusChanges: boolean;
+    documents: boolean;
+    notes: boolean;
+  };
+}
+
+// Default notification preferences
+export const DEFAULT_NOTIFICATION_PREFERENCES: Omit<NotificationPreferences, 'userId'> = {
+  browserNotificationsEnabled: true,
+  deadlineAlerts: {
+    enabled: true,
+    intervals: ['24h', '2h', '1h'],
+    browserPopup: true
+  },
+  calendarAlerts: {
+    enabled: true,
+    intervals: ['1h', '15m', 'at_time'],
+    browserPopup: true
+  },
+  meetingAlerts: {
+    enabled: true,
+    intervals: ['1d', '2h'],
+    browserPopup: true
+  },
+  stageAlerts: {
+    transitions: true,
+    stalledAlerts: true,
+    stalledThresholdDays: 3,
+    browserPopup: false
+  },
+  infoAlerts: {
+    newBids: true,
+    statusChanges: true,
+    documents: false,
+    notes: false
+  }
+};
 
 export interface StrategicRiskReport {
   risks: { category: string; description: string; severity: RiskLevel }[];

@@ -1,4 +1,4 @@
-import { BidRecord, TechnicalDocument, ActivityLog } from '../types.ts';
+import { BidRecord, TechnicalDocument, ActivityLog, CalendarEvent } from '../types.ts';
 
 const API_BASE = '/api';
 
@@ -99,5 +99,28 @@ export const auditApi = {
         });
         if (!res.ok) throw new Error('Failed to create audit log');
         return res.json();
+    },
+};
+
+export const calendarApi = {
+    getAll: async (): Promise<CalendarEvent[]> => {
+        const res = await fetch(`${API_BASE}/calendar-events`);
+        if (!res.ok) throw new Error('Failed to fetch calendar events');
+        return res.json();
+    },
+    create: async (event: CalendarEvent): Promise<CalendarEvent> => {
+        const res = await fetch(`${API_BASE}/calendar-events`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(event),
+        });
+        if (!res.ok) throw new Error('Failed to create calendar event');
+        return res.json();
+    },
+    remove: async (id: string): Promise<void> => {
+        const res = await fetch(`${API_BASE}/calendar-events/${id}`, {
+            method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Failed to delete calendar event');
     },
 };
