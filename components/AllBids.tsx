@@ -30,7 +30,8 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
             // Search Filter
             const matchesSearch = !searchQuery ||
                 bid.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                bid.customerName.toLowerCase().includes(searchQuery.toLowerCase());
+                bid.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                bid.id.toLowerCase().includes(searchQuery.toLowerCase());
 
             // Status Filter - Complex logic for Active vs Not Submitted
             let matchesStatus = false;

@@ -26,6 +26,10 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
         if (!start || !end) return 0;
         const s = new Date(start);
         const e = new Date(end);
+
+        // Handle invalid dates
+        if (isNaN(s.getTime()) || isNaN(e.getTime())) return 0;
+
         const diffTime = e.getTime() - s.getTime();
         return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
     };
@@ -45,16 +49,31 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
     };
 
     const stats = useMemo(() => {
-        const totalBids = bids.length || 1;
-        const avgIntakeLag = bids.reduce((acc, b) => acc + getDaysBetween(b.publishDate, b.receivedDate), 0) / totalBids;
-        const avgMarketWindow = bids.reduce((acc, b) => acc + getDaysBetween(b.publishDate, b.deadline), 0) / totalBids;
-        const avgTeamWindow = bids.reduce((acc, b) => acc + getDaysBetween(b.receivedDate, b.deadline), 0) / totalBids;
+        const totalBids = bids.length;
+        if (totalBids === 0) {
+            return {
+                avgIntakeLag: "0",
+                avgMarketWindow: "0",
+                avgTeamWindow: "0",
+                captureRate: "0"
+            };
+        }
+
+        const sumIntakeLag = bids.reduce((acc, b) => acc + (getDaysBetween(b.publishDate, b.receivedDate) || 0), 0);
+        const sumMarketWindow = bids.reduce((acc, b) => acc + (getDaysBetween(b.publishDate, b.deadline) || 0), 0);
+        const sumTeamWindow = bids.reduce((acc, b) => acc + (getDaysBetween(b.receivedDate, b.deadline) || 0), 0);
+
+        const avgIntakeLag = sumIntakeLag / totalBids;
+        const avgMarketWindow = sumMarketWindow / totalBids;
+        const avgTeamWindow = sumTeamWindow / totalBids;
+
+        const captureRate = avgMarketWindow > 0 ? (avgTeamWindow / avgMarketWindow) * 100 : 0;
 
         return {
-            avgIntakeLag: avgIntakeLag.toFixed(1),
-            avgMarketWindow: avgMarketWindow.toFixed(0),
-            avgTeamWindow: avgTeamWindow.toFixed(0),
-            captureRate: ((avgTeamWindow / avgMarketWindow) * 100).toFixed(0)
+            avgIntakeLag: (avgIntakeLag || 0).toFixed(1),
+            avgMarketWindow: (avgMarketWindow || 0).toFixed(0),
+            avgTeamWindow: (avgTeamWindow || 0).toFixed(0),
+            captureRate: (captureRate || 0).toFixed(0)
         };
     }, [bids]);
 
@@ -126,12 +145,12 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                 </div>
 
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left">
+                    <table className="w-full text-left table-fixed">
                         <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                             <tr>
-                                <th className="px-6 py-4 w-[12%]">Bid & Complexity</th>
-                                <th className="px-6 py-4 w-[73%]">Time Distribution (Market Horizon)</th>
-                                <th className="px-6 py-4 text-right w-[15%]">Phase Health</th>
+                                <th className="px-4 py-4 w-[10%] truncate">Bid & Complexity</th>
+                                <th className="px-4 py-4 w-[80%]">Time Distribution (Market Horizon)</th>
+                                <th className="px-4 py-4 text-right w-[10%]">Phase Health</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -149,21 +168,22 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
 
                                 return (
                                     <tr key={bid.id} className="group group/row hover:bg-slate-50/50 transition-all relative hover:z-[60]">
-                                        <td className="px-6 py-6 align-top">
-                                            <div className="font-black text-slate-900 leading-tight text-sm group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div>
-                                            <div className="flex flex-wrap items-center gap-2 mt-2">
+                                        <td className="px-4 py-6 align-top break-words">
+                                            <div className="font-black text-slate-900 leading-tight text-[11px] group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div>
+                                            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                                                <span className="text-[10px] font-black text-slate-400 border-b border-slate-100 pb-0.5 mb-1 w-full">{bid.id}</span>
                                                 <span className={clsx(
-                                                    "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border",
+                                                    "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest border shrink-0",
                                                     bid.complexity === 'High' ? "bg-red-50 text-red-600 border-red-100" :
                                                         bid.complexity === 'Medium' ? "bg-amber-50 text-amber-600 border-amber-100" :
                                                             "bg-emerald-50 text-emerald-600 border-emerald-100"
                                                 )}>
                                                     {bid.complexity}
                                                 </span>
-                                                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">{bid.customerName}</span>
+                                                <span className="text-[8px] text-slate-400 font-bold uppercase tracking-tight truncate">{bid.customerName}</span>
                                             </div>
                                         </td>
-                                        <td className="px-6 py-6 align-top">
+                                        <td className="px-4 py-6 align-top">
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase px-1">
                                                     <span>{sanitizeDateValue(bid.publishDate) || bid.publishDate} (Published)</span>
@@ -269,7 +289,7 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-6 py-6 text-right align-top">
+                                        <td className="px-4 py-6 text-right align-top">
                                             <div className="flex flex-col items-end">
                                                 <div className={clsx(
                                                     "flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest mb-2",

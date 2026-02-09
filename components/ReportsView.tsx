@@ -97,7 +97,8 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
     return bids.filter(b => {
       // Search Filter
       const matchesSearch = b.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        b.customerName.toLowerCase().includes(searchQuery.toLowerCase());
+        b.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        b.id.toLowerCase().includes(searchQuery.toLowerCase());
 
       // Status Filter - Complex logic for Active vs Not Submitted
       let matchesStatus = false;
@@ -533,9 +534,13 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
               <div className="flex flex-wrap gap-4">{Object.entries(STAGE_COLORS).map(([stage, color]) => (<div key={stage} className="flex items-center gap-1.5"><div className={clsx("w-2 h-2 rounded-full", color)}></div><span className="text-[8px] font-black text-slate-400 uppercase">{stage}</span></div>))}</div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-left">
+              <table className="w-full text-left table-fixed">
                 <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                  <tr><th className="px-12 py-8">Bid Identity</th><th className="px-12 py-8">Stage Distribution (Days)</th><th className="px-12 py-8 text-right">Total Horizon</th></tr>
+                  <tr>
+                    <th className="px-6 py-4 w-[15%] truncate">Bid Identity</th>
+                    <th className="px-6 py-4 w-[75%]">Stage Distribution (Days)</th>
+                    <th className="px-6 py-4 text-right w-[10%]">Total Horizon</th>
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {filteredBids.map((bid, index) => {
@@ -545,8 +550,14 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
                     const totalDays = getDaysBetween(startDate, endDate);
                     return (
                       <tr key={bid.id} className="group group/row hover:bg-slate-50/50 transition-all relative hover:z-[60]">
-                        <td className="px-12 py-10 max-w-xs"><div className="font-black text-slate-900 leading-tight text-lg group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div><div className="text-[11px] text-slate-400 font-bold uppercase mt-1 tracking-tight">{bid.customerName}</div></td>
-                        <td className="px-12 py-10">
+                        <td className="px-6 py-6 align-top break-words">
+                          <div className="font-black text-slate-900 leading-tight text-sm group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div>
+                          <div className="text-[10px] text-slate-400 font-bold uppercase mt-2 tracking-tight flex flex-col gap-1">
+                            <span className="text-[9px] font-black text-slate-300 border-b border-slate-50 pb-1">{bid.id}</span>
+                            <span>{bid.customerName}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-6 align-top">
                           <div className="flex items-center w-full min-w-[500px] h-14 bg-slate-100 rounded-2xl p-1.5 border border-slate-200 relative shadow-inner">
                             {(() => {
                               const actualDaysInStages = calculateDaysInStages(bid.receivedDate, bid.stageHistory || [], bid.currentStage);
@@ -617,7 +628,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
                             })()}
                           </div>
                         </td>
-                        <td className="px-12 py-10 text-right"><div className="text-3xl font-black text-slate-900">{totalDays}d</div><div className="text-[9px] font-bold text-slate-400 uppercase mt-1">Total Cycle</div></td>
+                        <td className="px-6 py-6 text-right align-top"><div className="text-2xl font-black text-slate-900 leading-none">{totalDays}d</div><div className="text-[9px] font-bold text-slate-400 uppercase mt-1">Total Cycle</div></td>
                       </tr>
                     );
                   })}
