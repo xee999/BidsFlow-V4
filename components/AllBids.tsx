@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Search, Calendar, Filter, Clock, Send, Trophy, ZapOff, Ban, Briefcase, ChevronDown, Zap } from 'lucide-react';
+import { Search, Calendar, Filter, Clock, Send, Trophy, ZapOff, Ban, Briefcase, ChevronDown, Zap, AlertCircle } from 'lucide-react';
 import { BidRecord, BidStatus, BidStage } from '../types.ts';
 import { SOLUTION_OPTIONS, SOLUTION_COLORS } from '../constants.tsx';
 import { clsx } from 'clsx';
@@ -23,14 +23,36 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
     const [dateType, setDateType] = useState<string>('received');
 
     const filteredBids = useMemo(() => {
+        const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
         return bids.filter(bid => {
             // Search Filter
             const matchesSearch = !searchQuery ||
                 bid.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 bid.customerName.toLowerCase().includes(searchQuery.toLowerCase());
 
-            // Status Filter
-            const matchesStatus = statusFilter === 'All' || bid.status === statusFilter;
+            // Status Filter - Complex logic for Active vs Not Submitted
+            let matchesStatus = false;
+            if (statusFilter === 'All') {
+                matchesStatus = true;
+            } else if (statusFilter === BidStatus.ACTIVE) {
+                // True Active are only those where deadline is today or future
+                const parts = bid.deadline.split('-');
+                const deadlineDate = parts.length >= 3
+                    ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+                    : new Date(bid.deadline);
+                matchesStatus = bid.status === BidStatus.ACTIVE && deadlineDate >= startOfToday;
+            } else if (statusFilter === BidStatus.NOT_SUBMITTED) {
+                // Not Submitted are those marked Active but deadline has passed
+                const parts = bid.deadline.split('-');
+                const deadlineDate = parts.length >= 3
+                    ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+                    : new Date(bid.deadline);
+                matchesStatus = (bid.status === BidStatus.ACTIVE || bid.status === BidStatus.NOT_SUBMITTED) && deadlineDate < startOfToday;
+            } else {
+                matchesStatus = bid.status === statusFilter;
+            }
 
             // Phase Filter
             const matchesPhase = phaseFilter === 'All' || bid.currentStage === phaseFilter;
@@ -38,36 +60,32 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
             // Solution Filter
             const matchesSolution = solutionFilter === 'All' || (bid.requiredSolutions && bid.requiredSolutions.includes(solutionFilter));
 
-            // Date Filtering Logic - Use local date parsing to avoid timezone shifts
+            // Determining dates for horizon/timeline
             const parseLocalDate = (dateStr: string) => {
                 if (!dateStr) return null;
                 const [y, m, d] = dateStr.split('-').map(Number);
                 return new Date(y, m - 1, d);
             };
 
-            // Determine which date to filter by
             let targetDateStr = bid.receivedDate;
             if (dateType === 'deadline') targetDateStr = bid.deadline;
             if (dateType === 'published') targetDateStr = bid.publishDate || '';
 
             const bidDate = parseLocalDate(targetDateStr);
 
-            const now = new Date();
-            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
             // Quick Horizon Filter
             let matchesHorizon = true;
             if (bidDate) {
                 if (quickHorizon === 'This Week') {
-                    const startOfWeek = new Date(today);
-                    startOfWeek.setDate(today.getDate() - today.getDay());
+                    const startOfWeek = new Date(startOfToday);
+                    startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
                     matchesHorizon = bidDate >= startOfWeek;
                 } else if (quickHorizon === 'This Month') {
-                    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+                    const startOfMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
                     matchesHorizon = bidDate >= startOfMonth;
                 }
             } else if (quickHorizon !== 'All') {
-                matchesHorizon = false; // Filter active but no date to check
+                matchesHorizon = false;
             }
 
             // Custom Timeline Filter
@@ -95,10 +113,11 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
     const statusOptions = [
         { label: 'ALL', value: 'All', icon: <Filter size={18} />, color: 'bg-[#0F172A] text-white border-transparent' },
         { label: 'ACTIVE', value: BidStatus.ACTIVE, icon: <Clock size={18} />, color: 'bg-[#EFF6FF] text-[#2563EB] border-[#DBEAFE]' },
+        { label: 'NOT SUBMITTED', value: BidStatus.NOT_SUBMITTED, icon: <AlertCircle size={18} />, color: 'bg-[#FEF2F2] text-[#DC2626] border-[#FEE2E2]' },
         { label: 'SUBMITTED', value: BidStatus.SUBMITTED, icon: <Send size={18} />, color: 'bg-[#FFFBEB] text-[#D97706] border-[#FEF3C7]' },
         { label: 'WON', value: BidStatus.WON, icon: <Trophy size={18} />, color: 'bg-[#F0FDF4] text-[#15803D] border-[#DCFCE7]' },
         { label: 'LOST', value: BidStatus.LOST, icon: <ZapOff size={18} />, color: 'bg-[#F8FAFC] text-[#64748B] border-[#F1F5F9]' },
-        { label: 'NO BID', value: BidStatus.NO_BID, icon: <Ban size={18} />, color: 'bg-[#FEF2F2] text-[#DC2626] border-[#FEE2E2]' },
+        { label: 'NO BID', value: BidStatus.NO_BID, icon: <Ban size={18} />, color: 'bg-[#F9FAFB] text-slate-500 border-slate-200' },
     ];
 
     return (

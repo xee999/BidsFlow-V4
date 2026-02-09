@@ -7,7 +7,7 @@ import {
     Search, Trash2, FileText, Pencil, ChevronDown, Package
 } from 'lucide-react';
 import { SOLUTION_COLORS } from '../constants.tsx';
-import { BidRecord, BidNote, CalendarEvent, User, BidStage } from '../types.ts';
+import { BidRecord, BidNote, CalendarEvent, User, BidStage, BidStatus } from '../types.ts';
 import { clsx } from 'clsx';
 import { sanitizeDateValue } from '../services/utils';
 import MentionInput from './MentionInput';
@@ -265,7 +265,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdate
 
                                 {/* Events/Bids Container */}
                                 <div className="flex-1 flex flex-col gap-1 overflow-y-auto">
-                                    {/* Bids - Red Pill Shape with Document Icon */}
+                                    {/* Bids - Status-dependent color pills */}
                                     {dayBids.map(bid => (
                                         <div
                                             key={bid.id}
@@ -273,7 +273,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdate
                                             onMouseEnter={(e) => setHoveredBid({ bid, x: e.clientX, y: e.clientY })}
                                             onMouseMove={(e) => setHoveredBid(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)}
                                             onMouseLeave={() => setHoveredBid(null)}
-                                            className="flex items-center gap-1.5 px-2 py-1 bg-red-500 text-white text-[10px] font-semibold cursor-pointer hover:bg-red-600 transition-all truncate rounded-full shadow-sm"
+                                            className={clsx(
+                                                "flex items-center gap-1.5 px-2 py-1 text-white text-[10px] font-semibold cursor-pointer transition-all truncate rounded-full shadow-sm",
+                                                bid.status === BidStatus.NO_BID ? "bg-slate-400 hover:bg-slate-500" : "bg-red-500 hover:bg-red-600"
+                                            )}
                                         >
                                             <FileText size={10} className="shrink-0" />
                                             <span className="truncate">{bid.projectName}</span>
@@ -350,7 +353,12 @@ const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdate
                                     <div className="flex items-center gap-2">
                                         <span className="text-[10px] font-bold text-gray-400 tracking-widest uppercase">{selectedBid.id}</span>
                                         <div className="w-1 h-1 bg-gray-300 rounded-full"></div>
-                                        <span className="px-2 py-0.5 bg-red-50 text-red-600 text-[9px] font-bold rounded uppercase tracking-wider border border-red-100">Live Bid</span>
+                                        <span className={clsx(
+                                            "px-2 py-0.5 text-[9px] font-bold rounded uppercase tracking-wider border",
+                                            selectedBid.status === BidStatus.NO_BID ? "bg-slate-50 text-slate-500 border-slate-200" : "bg-red-50 text-red-600 border-red-100"
+                                        )}>
+                                            {selectedBid.status === BidStatus.NO_BID ? 'No Bid' : 'Live Bid'}
+                                        </span>
                                     </div>
                                     <h2 className="text-lg font-bold text-gray-900 leading-snug">{selectedBid.projectName}</h2>
                                     <p className="text-gray-500 font-medium text-xs">{selectedBid.customerName}</p>
@@ -365,7 +373,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdate
                                         <Clock size={12} className="text-gray-400 mt-1" />
                                         <div className="flex flex-col">
                                             <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider">Deadline</span>
-                                            <span className="text-[11px] font-semibold leading-tight text-red-600">
+                                            <span className={clsx(
+                                                "text-[11px] font-semibold leading-tight",
+                                                selectedBid.status === BidStatus.NO_BID ? "text-slate-500" : "text-red-600"
+                                            )}>
                                                 {sanitizeDateValue(selectedBid.deadline) || selectedBid.deadline}
                                             </span>
                                         </div>

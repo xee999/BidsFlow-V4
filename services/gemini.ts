@@ -472,8 +472,9 @@ export const analyzeNoBidReasons = async (noBidData: any[]) => {
               items: {
                 type: SchemaType.OBJECT,
                 properties: {
-                  header: { type: SchemaType.STRING },
-                  description: { type: SchemaType.STRING },
+                  header: { type: SchemaType.STRING, description: "Category Name (e.g. Financial Viability)" },
+                  reasonCode: { type: SchemaType.STRING, description: "Short 3-5 word summary of the root cause" },
+                  strategicAnalysis: { type: SchemaType.STRING, description: "Detailed paragraph analyzing why this is happening and its impact." },
                   projects: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } }
                 }
               }
@@ -483,9 +484,32 @@ export const analyzeNoBidReasons = async (noBidData: any[]) => {
       }
     });
 
-    const result = await callAIWithRetry(() => model.generateContent(`Analyze rejection data.`));
+    const prompt = `
+      ACT AS A BID MANAGER & STRATEGIC ANALYST.
+      
+      CONTEXT:
+      I have a list of infrastructure/software projects where we decided "No Bid" (declined to participate).
+      
+      YOUR TASK:
+      1. Analyze the provided list of projects and their "No Bid" reasons.
+      2. Group them into 3-5 distinct strategic categories (e.g., "Financial Viability", "Technical Capability", "Resource Constraints").
+      3. For each category:
+         - 'header': The Category Name.
+         - 'reasonCode': A short, punchy summary (e.g. "Low Margins", "Lack of Certifications") for a table view.
+         - 'strategicAnalysis': A deep dive (2-3 sentences) explaining the trend, why we are losing these opportunities, and a strategic recommendation.
+         - 'projects': The list of project names in this category.
+      
+      DATA TO ANALYZE:
+      ${JSON.stringify(noBidData, null, 2)}
+      
+      OUTPUT:
+      JSON object with 'categories' array.
+    `;
+
+    const result = await callAIWithRetry(() => model.generateContent(prompt));
     return JSON.parse(result.response.text());
   } catch (error) {
+    console.error("No Bid Analysis failed:", error);
     return null;
   }
 };

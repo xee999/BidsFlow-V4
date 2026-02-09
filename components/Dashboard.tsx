@@ -31,7 +31,7 @@ const STAGE_COLORS: Record<string, { bg: string, text: string, border: string }>
 
 
 const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid, onViewBid, onNavigateToFilter }) => {
-  const [sortBy, setSortBy] = React.useState<'priority' | 'due' | 'intake'>('priority');
+  const [sortBy, setSortBy] = React.useState<'priority' | 'due' | 'intake'>('due');
 
   const currentMonthName = useMemo(() => {
     return new Date().toLocaleString('default', { month: 'long' }).toUpperCase();
@@ -102,8 +102,20 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
   };
 
   const prioritizedBids = useMemo(() => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
     let mapped = bids
-      .filter(b => b.status === BidStatus.ACTIVE)
+      .filter(b => {
+        const isActive = b.status === BidStatus.ACTIVE;
+        // Parse strictly as YYYY-MM-DD to local time to avoid timezone offsets
+        const parts = b.deadline.split('-');
+        const deadline = parts.length >= 3
+          ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+          : new Date(b.deadline); // Fallback
+
+        return isActive && deadline >= startOfToday;
+      })
       .map(b => ({ ...b, aiContext: getPriorityContext(b), integrity: calculateIntegrity(b) }));
 
     if (sortBy === 'priority') {
@@ -121,11 +133,21 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
   }, [bids, sortBy]);
 
   const stats = useMemo(() => {
-    const active = bids.filter(b => b.status === BidStatus.ACTIVE);
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const active = bids.filter(b => {
+      if (b.status !== BidStatus.ACTIVE) return false;
+      const parts = b.deadline.split('-');
+      const deadline = parts.length >= 3
+        ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+        : new Date(b.deadline);
+      return deadline >= startOfToday;
+    });
+
     const highRiskActive = active.filter(b => b.riskLevel === RiskLevel.HIGH);
     const noBidsThisMonth = bids.filter(b => b.status === BidStatus.NO_BID && isCurrentMonth(b.receivedDate));
     const winsThisMonth = bids.filter(b => b.status === BidStatus.WON && isCurrentMonth(b.submissionDate || b.deadline));
-    const submittedMonth = bids.filter(b => b.status === BidStatus.SUBMITTED && isCurrentMonth(b.submissionDate));
     const activeValue = active.reduce((acc, b) => acc + (b.estimatedValue || 0), 0);
     return { activeCount: active.length, highRiskCount: highRiskActive.length, noBidCount: noBidsThisMonth.length, winsMonthCount: winsThisMonth.length, activeValue };
   }, [bids]);

@@ -15,6 +15,7 @@ interface BidIntakeProps {
 
 const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
@@ -22,6 +23,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [duplicateCandidates, setDuplicateCandidates] = useState<any[]>([]);
   const [formData, setFormData] = useState<Partial<BidRecord>>({
+    id: '',
     customerName: '',
     projectName: '',
     deadline: '',
@@ -81,9 +83,12 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
     return num.toLocaleString();
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const processFile = async (file: File) => {
     if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setAiError("Please upload a PDF document.");
+      return;
+    }
 
     setIsAnalyzing(true);
     setAiError(null);
@@ -167,10 +172,40 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
         setAiError("AI extraction failed. Please ensure the document is readable or proceed with manual entry.");
       } finally {
         setIsAnalyzing(false);
-        if (e.target) e.target.value = "";
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await processFile(file);
+      e.target.value = "";
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      await processFile(file);
+    }
   };
 
   const toggleSolution = (sol: string) => {
@@ -192,7 +227,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
 
     // Strict Mandatory Validation Logic (All except Estimated Value)
     const requiredFields: (keyof BidRecord)[] = [
-      'customerName', 'projectName', 'jbcName', 'deadline',
+      'id', 'customerName', 'projectName', 'jbcName', 'deadline',
       'bidSecurity', 'contractDuration', 'summaryRequirements', 'scopeOfWork'
     ];
 
@@ -233,7 +268,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
   const proceedWithSubmission = () => {
     setIsSubmitting(true);
     const newBid: BidRecord = {
-      id: 'bid-' + crypto.randomUUID(),
+      id: formData.id || ('bid-' + crypto.randomUUID()),
       customerName: formData.customerName!,
       projectName: formData.projectName!,
       deadline: formData.deadline || new Date().toISOString().split('T')[0],
@@ -299,7 +334,15 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
 
           <div
             onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center hover:border-[#D32F2F] hover:bg-red-50/30 transition-all cursor-pointer group"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={clsx(
+              "border-2 border-dashed rounded-2xl p-10 text-center transition-all cursor-pointer group",
+              isDragging
+                ? "border-[#D32F2F] bg-red-50/50 scale-[1.02]"
+                : "border-slate-200 hover:border-[#D32F2F] hover:bg-red-50/30"
+            )}
           >
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".pdf" />
             {isAnalyzing ? (
@@ -309,16 +352,24 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
               </div>
             ) : (
               <div className="flex flex-col items-center gap-3">
-                <div className="p-4 bg-red-50 rounded-full group-hover:scale-110 transition-transform shadow-inner">
+                <div className={clsx(
+                  "p-4 rounded-full transition-transform shadow-inner",
+                  isDragging ? "bg-red-100 scale-110" : "bg-red-50 group-hover:scale-110"
+                )}>
                   <Upload className="text-[#D32F2F]" size={32} />
                 </div>
-                <p className="font-bold text-slate-700 uppercase tracking-tight">Upload Tender Document</p>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI will map mandatory governance fields</p>
+                <p className="font-bold text-slate-700 uppercase tracking-tight">
+                  {isDragging ? "Drop to Upload" : "Upload Tender Document"}
+                </p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  {isDragging ? "Release your file here" : "AI will map mandatory governance fields"}
+                </p>
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <InputField label="Bid ID*" value={formData.id} error={errors.id} onChange={v => { setFormData({ ...formData, id: v }); if (v) setErrors(p => ({ ...p, id: false })); }} placeholder="e.g. T-82013" />
             <InputField label="Customer Name*" value={formData.customerName} error={errors.customerName} onChange={v => { setFormData({ ...formData, customerName: v }); if (v) setErrors(p => ({ ...p, customerName: false })); }} />
             <InputField label="Project Name*" value={formData.projectName} error={errors.projectName} onChange={v => { setFormData({ ...formData, projectName: v }); if (v) setErrors(p => ({ ...p, projectName: false })); }} />
           </div>

@@ -13,7 +13,8 @@ export enum BidStatus {
   SUBMITTED = 'Submitted',
   WON = 'Won',
   LOST = 'Lost',
-  NO_BID = 'No Bid'
+  NO_BID = 'No Bid',
+  NOT_SUBMITTED = 'Not Submitted'
 }
 
 export enum RiskLevel {

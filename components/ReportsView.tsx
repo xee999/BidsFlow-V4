@@ -47,7 +47,8 @@ export const STAGE_COLORS: Record<string, string> = {
 
 interface NoBidCategory {
   header: string;
-  description: string;
+  reasonCode: string;
+  strategicAnalysis: string;
   projects: string[];
 }
 
@@ -88,70 +89,37 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
     setIsAnalyzingNoBids(false);
   };
 
-  const stats = useMemo(() => {
-    const total = bids.length || 1;
-    const won = bids.filter(b => b.status === BidStatus.WON);
-    const lost = bids.filter(b => b.status === BidStatus.LOST);
-    const submitted = bids.filter(b => b.status === BidStatus.SUBMITTED);
-    const active = bids.filter(b => b.status === BidStatus.ACTIVE);
-    const noBid = bids.filter(b => b.status === BidStatus.NO_BID);
-
-    const totalValue = bids.reduce((acc, b) => acc + (b.estimatedValue || 0), 0);
-    const wonValue = won.reduce((acc, b) => acc + (b.estimatedValue || 0), 0);
-
-    return {
-      total: bids.length,
-      won: { count: won.length, percent: Math.round((won.length / total) * 100), value: wonValue },
-      lost: { count: lost.length, percent: Math.round((lost.length / total) * 100) },
-      submitted: { count: submitted.length, percent: Math.round((submitted.length / total) * 100) },
-      active: { count: active.length, percent: Math.round((active.length / total) * 100) },
-      noBid: { count: noBid.length, percent: Math.round((noBid.length / total) * 100) },
-      totalValue
-    };
-  }, [bids]);
-
-  const velocityInsights = useMemo(() => {
-    if (bids.length === 0) return null;
-
-    const submittedBids = bids.filter(b => b.status !== BidStatus.ACTIVE);
-    const avgCycle = submittedBids.length > 0
-      ? submittedBids.reduce((acc: number, b: BidRecord) => {
-        const start = b.stageHistory?.[0]?.timestamp || b.receivedDate;
-        const end = b.submissionDate || new Date().toISOString();
-        const s = new Date(start);
-        const e = new Date(end);
-        return acc + Math.ceil(Math.abs(e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24));
-      }, 0) / submittedBids.length
-      : 0;
-
-    // Detect bottleneck stage
-    const stageTotals: Record<string, number> = {};
-    bids.forEach(b => {
-      Object.entries(b.daysInStages || {}).forEach(([stage, days]: [string, any]) => {
-        stageTotals[stage] = (stageTotals[stage] || 0) + (days as number);
-      });
-    });
-
-    let bottleneck = { name: 'None', avg: 0 };
-    Object.entries(stageTotals).forEach(([name, total]: [string, any]) => {
-      const avg = (total as number) / bids.length;
-      if (avg > bottleneck.avg) bottleneck = { name, avg };
-    });
-
-    return {
-      avgCycle: avgCycle.toFixed(1),
-      bottleneck,
-      efficiencyIndex: (avgCycle < 15 ? 'High' : avgCycle < 25 ? 'Normal' : 'Low Warning')
-    };
-  }, [bids]);
-
   const filteredBids = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
     return bids.filter(b => {
-      const matchesStatus = filterStatus === 'All' || b.status === filterStatus;
-      const matchesStage = filterStage === 'All' || b.currentStage === filterStage;
-      const matchesSolution = filterSolution === 'All' || (b.requiredSolutions || []).includes(filterSolution);
+      // Search Filter
       const matchesSearch = b.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         b.customerName.toLowerCase().includes(searchQuery.toLowerCase());
+
+      // Status Filter - Complex logic for Active vs Not Submitted
+      let matchesStatus = false;
+      if (filterStatus === 'All') {
+        matchesStatus = true;
+      } else if (filterStatus === BidStatus.ACTIVE) {
+        const parts = b.deadline.split('-');
+        const deadlineDate = parts.length >= 3
+          ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+          : new Date(b.deadline);
+        matchesStatus = b.status === BidStatus.ACTIVE && deadlineDate >= startOfToday;
+      } else if (filterStatus === (BidStatus as any).NOT_SUBMITTED || filterStatus === 'Not Submitted') {
+        const parts = b.deadline.split('-');
+        const deadlineDate = parts.length >= 3
+          ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+          : new Date(b.deadline);
+        matchesStatus = b.status === BidStatus.ACTIVE && deadlineDate < startOfToday;
+      } else {
+        matchesStatus = b.status === filterStatus;
+      }
+
+      const matchesStage = filterStage === 'All' || b.currentStage === filterStage;
+      const matchesSolution = filterSolution === 'All' || (b.requiredSolutions || []).includes(filterSolution);
 
       // Date Filtering Logic
       const parseLocalDate = (dateStr: string) => {
@@ -187,17 +155,16 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
 
       // Quick Horizon
       if (quickHorizon !== 'All') {
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
         if (!bidDate) {
           matchesRange = false;
         } else {
           if (quickHorizon === 'This Week') {
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const startOfWeek = new Date(today);
             startOfWeek.setDate(today.getDate() - today.getDay());
             matchesRange = matchesRange && bidDate >= startOfWeek;
           } else if (quickHorizon === 'This Month') {
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
             matchesRange = matchesRange && bidDate >= startOfMonth;
           }
@@ -207,6 +174,84 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
       return matchesStatus && matchesStage && matchesSearch && matchesSolution && matchesRange;
     });
   }, [bids, filterStatus, filterStage, searchQuery, filterSolution, quickHorizon, dateType, dateRange]);
+
+  const stats = useMemo(() => {
+    const total = filteredBids.length || 1;
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const won = filteredBids.filter(b => b.status === BidStatus.WON);
+    const lost = filteredBids.filter(b => b.status === BidStatus.LOST);
+    const submitted = filteredBids.filter(b => b.status === BidStatus.SUBMITTED);
+    const active = filteredBids.filter(b => {
+      const parts = b.deadline.split('-');
+      const deadlineDate = parts.length >= 3
+        ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+        : new Date(b.deadline);
+      return b.status === BidStatus.ACTIVE && deadlineDate >= startOfToday;
+    });
+    const notSubmitted = filteredBids.filter(b => {
+      const parts = b.deadline.split('-');
+      const deadlineDate = parts.length >= 3
+        ? new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+        : new Date(b.deadline);
+      return b.status === BidStatus.ACTIVE && deadlineDate < startOfToday;
+    });
+    const noBid = filteredBids.filter(b => b.status === BidStatus.NO_BID);
+
+    const totalValue = filteredBids.reduce((acc, b) => acc + (b.estimatedValue || 0), 0);
+    const wonValue = won.reduce((acc, b) => acc + (b.estimatedValue || 0), 0);
+
+    return {
+      total: filteredBids.length,
+      won: { count: won.length, percent: Math.round((won.length / total) * 100), value: wonValue },
+      lost: { count: lost.length, percent: Math.round((lost.length / total) * 100) },
+      submitted: { count: submitted.length, percent: Math.round((submitted.length / total) * 100) },
+      active: { count: active.length, percent: Math.round((active.length / total) * 100) },
+      notSubmitted: { count: notSubmitted.length, percent: Math.round((notSubmitted.length / total) * 100) },
+      noBid: { count: noBid.length, percent: Math.round((noBid.length / total) * 100) },
+      totalValue
+    };
+  }, [filteredBids]);
+
+  const velocityInsights = useMemo(() => {
+    if (filteredBids.length === 0) return null;
+
+    const completedBids = filteredBids.filter(b =>
+      b.status === BidStatus.SUBMITTED ||
+      b.status === BidStatus.WON ||
+      b.status === BidStatus.LOST
+    );
+    const avgCycle = completedBids.length > 0
+      ? completedBids.reduce((acc: number, b: BidRecord) => {
+        const start = b.stageHistory?.[0]?.timestamp || b.receivedDate;
+        const end = b.submissionDate || new Date().toISOString();
+        const s = new Date(start);
+        const e = new Date(end);
+        return acc + Math.ceil(Math.abs(e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24));
+      }, 0) / completedBids.length
+      : 0;
+
+    // Detect bottleneck stage
+    const stageTotals: Record<string, number> = {};
+    filteredBids.forEach(b => {
+      Object.entries(b.daysInStages || {}).forEach(([stage, days]: [string, any]) => {
+        stageTotals[stage] = (stageTotals[stage] || 0) + (days as number);
+      });
+    });
+
+    let bottleneck = { name: 'None', avg: 0 };
+    Object.entries(stageTotals).forEach(([name, total]: [string, any]) => {
+      const avg = (total as number) / filteredBids.length;
+      if (avg > bottleneck.avg) bottleneck = { name, avg };
+    });
+
+    return {
+      avgCycle: avgCycle.toFixed(1),
+      bottleneck,
+      efficiencyIndex: (avgCycle < 15 ? 'High' : avgCycle < 25 ? 'Normal' : 'Low Warning')
+    };
+  }, [filteredBids]);
 
   const getDaysBetween = (start: string, end: string) => {
     const s = new Date(start);
@@ -219,10 +264,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
   const statusFilterConfigs = [
     { id: 'All', label: 'All', icon: <Filter size={14} />, activeClass: "bg-slate-900 text-white shadow-lg", inactiveClass: "text-slate-500 hover:bg-slate-100 border-slate-200" },
     { id: BidStatus.ACTIVE, label: 'Active', icon: <Clock size={14} />, activeClass: "bg-blue-600 text-white shadow-lg", inactiveClass: "text-blue-600 bg-blue-50/50 border-blue-100 hover:bg-blue-50" },
+    { id: BidStatus.NOT_SUBMITTED, label: 'Not Submitted', icon: <AlertCircle size={14} />, activeClass: "bg-red-500 text-white shadow-lg", inactiveClass: "text-red-600 bg-red-50 border-red-100 hover:bg-red-50" },
     { id: BidStatus.SUBMITTED, label: 'Submitted', icon: <SendIcon size={14} />, activeClass: "bg-amber-500 text-white shadow-lg", inactiveClass: "text-amber-600 bg-amber-50/50 border-amber-100 hover:bg-amber-50" },
     { id: BidStatus.WON, label: 'Won', icon: <Trophy size={14} />, activeClass: "bg-emerald-600 text-white shadow-lg", inactiveClass: "text-emerald-600 bg-emerald-50/50 border-emerald-100 hover:bg-emerald-50" },
     { id: BidStatus.LOST, label: 'Lost', icon: <ZapOff size={14} />, activeClass: "bg-slate-500 text-white shadow-lg", inactiveClass: "text-slate-500 bg-slate-50 border-slate-200 hover:bg-slate-100" },
-    { id: BidStatus.NO_BID, label: 'No Bid', icon: <Ban size={14} />, activeClass: "bg-red-600 text-white shadow-lg", inactiveClass: "text-red-600 bg-red-50 border-red-100 hover:bg-red-50" },
+    { id: BidStatus.NO_BID, label: 'No Bid', icon: <Ban size={14} />, activeClass: "bg-slate-400 text-white shadow-lg", inactiveClass: "text-slate-400 bg-slate-50 border-slate-100 hover:bg-slate-50" },
   ];
 
   return (
@@ -587,7 +633,72 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
               <button onClick={handleRunNoBidAnalysis} disabled={isAnalyzingNoBids || noBidProjects.length === 0} className="flex items-center gap-3 px-8 py-4 bg-[#D32F2F] hover:bg-red-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all shadow-xl disabled:opacity-50 active:scale-95">{isAnalyzingNoBids ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />} Generate AI Insights Report</button>
             </div>
           </div>
-          {isAnalyzingNoBids ? (<div className="py-32 flex flex-col items-center justify-center gap-6 animate-pulse text-center"><Sparkles size={64} className="text-amber-400" /><p className="text-xl font-black text-slate-900 uppercase tracking-widest mb-2">Synthesizing Friction Themes</p></div>) : noBidCategories.length > 0 ? (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-fade-in">{noBidCategories.map((cat, i) => (<div key={i} className="bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-[#D32F2F] transition-all group"><div className="p-10 border-b border-slate-50 bg-slate-50/30 text-left"><div className="flex items-center gap-3 mb-4"><div className="p-3 bg-white rounded-xl shadow-sm border border-slate-100"><Lightbulb className="text-amber-500" size={20} /></div><h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">{cat.header}</h3></div><p className="text-sm text-slate-500 font-medium leading-relaxed">{cat.description}</p></div><div className="p-10 flex-1 bg-white"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Affected Opportunities</h4><div className="space-y-3">{cat.projects.map((proj, idx) => (<div key={idx} className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100"><div className="w-1.5 h-1.5 rounded-full bg-[#D32F2F]"></div><span className="text-xs font-black text-slate-700">{proj}</span></div>))}</div></div></div>))}</div>) : (<div className="py-24 flex flex-col items-center justify-center text-slate-300 bg-white rounded-[4rem] border-2 border-dashed border-slate-100 text-center"><FileQuestion size={80} className="opacity-10 mb-8" /><p className="text-xl font-black uppercase tracking-widest">Awaiting Analysis</p></div>)}
+
+          {isAnalyzingNoBids ? (
+            <div className="py-32 flex flex-col items-center justify-center gap-6 animate-pulse text-center"><Sparkles size={64} className="text-amber-400" /><p className="text-xl font-black text-slate-900 uppercase tracking-widest mb-2">Synthesizing Friction Themes</p></div>
+          ) : noBidCategories.length > 0 ? (
+            <div className="space-y-12">
+              {/* Summary Table */}
+              <div className="bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden p-8">
+                <div className="flex items-center gap-3 mb-6 px-4">
+                  <div className="p-2 bg-slate-100 rounded-lg"><BarChart3 size={20} className="text-slate-500" /></div>
+                  <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Rejection Landscape Summary</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                      <tr>
+                        <th className="px-8 py-4">Strategy Category</th>
+                        <th className="px-8 py-4">Primary Factor</th>
+                        <th className="px-8 py-4 text-right">Count</th>
+                        <th className="px-8 py-4 text-right">% Impact</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {noBidCategories.map((cat, i) => (
+                        <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-8 py-4 text-sm font-bold text-slate-800">{cat.header}</td>
+                          <td className="px-8 py-4 text-xs font-medium text-slate-500">{cat.reasonCode || 'Various factors'}</td>
+                          <td className="px-8 py-4 text-right text-sm font-bold text-slate-900">{cat.projects.length}</td>
+                          <td className="px-8 py-4 text-right text-xs font-bold text-slate-400">
+                            {noBidProjects.length > 0 ? Math.round((cat.projects.length / noBidProjects.length) * 100) : 0}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Deep Dive Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-fade-in">
+                {noBidCategories.map((cat, i) => (
+                  <div key={i} className="bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-[#D32F2F] transition-all group">
+                    <div className="p-10 border-b border-slate-50 bg-slate-50/30 text-left">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="p-3 bg-white rounded-xl shadow-sm border border-slate-100"><Lightbulb className="text-amber-500" size={20} /></div>
+                        <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">{cat.header}</h3>
+                      </div>
+                      <p className="text-sm text-slate-600 font-medium leading-relaxed">{cat.strategicAnalysis}</p>
+                    </div>
+                    <div className="p-10 flex-1 bg-white">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Affected Opportunities</h4>
+                      <div className="space-y-3">
+                        {cat.projects.map((proj, idx) => (
+                          <div key={idx} className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[#D32F2F]"></div>
+                            <span className="text-xs font-black text-slate-700">{proj}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="py-24 flex flex-col items-center justify-center text-slate-300 bg-white rounded-[4rem] border-2 border-dashed border-slate-100 text-center"><FileQuestion size={80} className="opacity-10 mb-8" /><p className="text-xl font-black uppercase tracking-widest">Awaiting Analysis</p></div>
+          )}
         </div>
       )}
     </div>
