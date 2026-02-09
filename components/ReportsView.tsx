@@ -216,6 +216,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
     };
   }, [filteredBids]);
 
+
   const velocityInsights = useMemo(() => {
     if (filteredBids.length === 0) return null;
 
@@ -224,14 +225,22 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
       b.status === BidStatus.WON ||
       b.status === BidStatus.LOST
     );
-    const avgCycle = completedBids.length > 0
-      ? completedBids.reduce((acc: number, b: BidRecord) => {
+
+    // Calculate cycle time with validation to prevent NaN
+    const validBids = completedBids.filter(b => {
+      const start = b.stageHistory?.[0]?.timestamp || b.receivedDate;
+      const end = b.submissionDate || new Date().toISOString();
+      return !isNaN(new Date(start).getTime()) && !isNaN(new Date(end).getTime());
+    });
+
+    const avgCycle = validBids.length > 0
+      ? validBids.reduce((acc: number, b: BidRecord) => {
         const start = b.stageHistory?.[0]?.timestamp || b.receivedDate;
         const end = b.submissionDate || new Date().toISOString();
         const s = new Date(start);
         const e = new Date(end);
         return acc + Math.ceil(Math.abs(e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24));
-      }, 0) / completedBids.length
+      }, 0) / validBids.length
       : 0;
 
     // Detect bottleneck stage
@@ -510,9 +519,9 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-slate-900 rounded-[2rem] p-6 text-white flex flex-col justify-center relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-125 transition-transform duration-500"><TrendingUp size={64} /></div>
-              <div className="flex items-center gap-2 mb-3"><Sparkles size={14} className="text-amber-400" /><span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Avg. Submission Velocity</span></div>
+              <div className="flex items-center gap-2 mb-3"><Sparkles size={14} className="text-amber-400" /><span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Avg. Submission Tempo</span></div>
               <div className="text-3xl font-black mb-1">{velocityInsights?.avgCycle}d</div>
-              <p className="text-[9px] font-bold text-slate-400 uppercase">Per Opportunity Lifecycle</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase">Receipt to Submission (Days)</p>
             </div>
             <div className="bg-white border-2 border-[#D32F2F] rounded-[2rem] p-6 flex flex-col justify-center relative group">
               <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:rotate-12 transition-transform duration-500"><ZapOff size={64} className="text-[#D32F2F]" /></div>

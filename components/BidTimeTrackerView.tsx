@@ -63,17 +63,21 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
         const sumMarketWindow = bids.reduce((acc, b) => acc + (getDaysBetween(b.publishDate, b.deadline) || 0), 0);
         const sumTeamWindow = bids.reduce((acc, b) => acc + (getDaysBetween(b.receivedDate, b.deadline) || 0), 0);
 
-        const avgIntakeLag = sumIntakeLag / totalBids;
-        const avgMarketWindow = sumMarketWindow / totalBids;
-        const avgTeamWindow = sumTeamWindow / totalBids;
+        const avgIntakeLag = Math.max(0, sumIntakeLag / totalBids);
+        const avgMarketWindow = Math.max(0, sumMarketWindow / totalBids);
+        const avgTeamWindow = Math.max(0, sumTeamWindow / totalBids);
 
-        const captureRate = avgMarketWindow > 0 ? (avgTeamWindow / avgMarketWindow) * 100 : 0;
+        // Window Utilization logic: How much of the client-provided window was available to us?
+        // If we get it the day it's published, it's 100%. If we get it halfway, it's 50%.
+        const utilization = avgMarketWindow > 0
+            ? Math.max(0, Math.min(100, (avgTeamWindow / avgMarketWindow) * 100))
+            : 0;
 
         return {
             avgIntakeLag: (avgIntakeLag || 0).toFixed(1),
             avgMarketWindow: (avgMarketWindow || 0).toFixed(0),
             avgTeamWindow: (avgTeamWindow || 0).toFixed(0),
-            captureRate: (captureRate || 0).toFixed(0)
+            captureRate: (utilization || 0).toFixed(0)
         };
     }, [bids]);
 
@@ -92,29 +96,29 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
 
                 <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group border-b-4 border-b-red-500">
                     <div className="flex items-center justify-between mb-4">
-                        <span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Delayed Start</span>
+                        <span className="text-[9px] font-black text-red-500 uppercase tracking-widest">Intake Lag</span>
                         <div className="p-2.5 bg-red-50 rounded-xl text-red-600"><Timer size={18} /></div>
                     </div>
                     <div className="text-3xl font-black text-slate-900 mb-1">{stats.avgIntakeLag}d</div>
-                    <div className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">Avg. Days Lost Before Intake</div>
+                    <div className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">Avg. Time from Publish to Internal Receipt</div>
                 </div>
 
                 <div className="bg-slate-900 p-6 rounded-[2.5rem] shadow-xl relative overflow-hidden group">
                     <div className="flex items-center justify-between mb-4">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-white/50">Our Execution Time</span>
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-white/50">Team Prep Duration</span>
                         <div className="p-2.5 bg-white/10 rounded-xl text-white"><Clock size={18} /></div>
                     </div>
                     <div className="text-3xl font-black text-white mb-1">{stats.avgTeamWindow}d</div>
-                    <div className="text-[9px] text-white/40 font-bold uppercase tracking-tight">Days Left To Win The Bid</div>
+                    <div className="text-[9px] text-white/40 font-bold uppercase tracking-tight">Avg. Duration from Intake to Deadline</div>
                 </div>
 
                 <div className="bg-[#D32F2F] p-6 rounded-[2.5rem] shadow-xl relative overflow-hidden group">
                     <div className="flex items-center justify-between mb-4">
-                        <span className="text-[9px] font-black text-white/50 uppercase tracking-widest">Capture Efficiency</span>
+                        <span className="text-[9px] font-black text-white/50 uppercase tracking-widest">Window Utilization</span>
                         <div className="p-2.5 bg-white/10 rounded-xl text-white"><Zap size={18} /></div>
                     </div>
                     <div className="text-3xl font-black text-white mb-1">{stats.captureRate}%</div>
-                    <div className="text-[9px] text-white/40 font-bold uppercase tracking-tight">Window Salvage Rate</div>
+                    <div className="text-[9px] text-white/40 font-bold uppercase tracking-tight">Share of Market Window Captured</div>
                     <div className="mt-3 h-1.5 w-full bg-white/20 rounded-full overflow-hidden">
                         <div className="h-full bg-white transition-all duration-1000" style={{ width: `${stats.captureRate}%` }}></div>
                     </div>
