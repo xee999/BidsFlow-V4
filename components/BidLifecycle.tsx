@@ -32,6 +32,7 @@ interface BidLifecycleProps {
   userRole?: string;
   addAuditLog?: (log: ActivityLog) => void;
   currentUser?: User;
+  onEditIntake?: () => void;
 }
 
 // Phase weights by complexity (total = 100%)
@@ -79,7 +80,7 @@ const getTimingStatus = (elapsed: number, target: number): { status: 'ahead' | '
   return { status: 'behind', color: 'bg-red-50 text-red-600 border-red-200' };
 };
 
-const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, userRole, addAuditLog, currentUser }) => {
+const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, userRole, addAuditLog, currentUser, onEditIntake }) => {
   const [viewingStage, setViewingStage] = useState<BidStage>(bid.currentStage);
   const [showNoBidModal, setShowNoBidModal] = useState(false);
   const [showOutcomeModal, setShowOutcomeModal] = useState<'Won' | 'Lost' | null>(null);
@@ -760,6 +761,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
           userRole={userRole}
           handleProgressStage={handleProgressStage}
           setShowNoBidModal={setShowNoBidModal}
+          onEditIntake={onEditIntake}
           stagesOrder={stagesOrder}
           currentOfficialIndex={currentOfficialIndex}
         />

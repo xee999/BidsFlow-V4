@@ -456,6 +456,7 @@ export type AppSection =
   | 'risk-watch'
   | 'calendar'
   | 'settings'
+  | 'edit_bids'
   | 'delete-manager';
 
 // All available sections (for iteration)
@@ -470,6 +471,7 @@ export const APP_SECTIONS: { id: AppSection; label: string }[] = [
   { id: 'risk-watch', label: 'Risk Watch' },
   { id: 'calendar', label: 'Calendar' },
   { id: 'settings', label: 'Settings' },
+  { id: 'edit_bids', label: 'Edit Bids' },
   { id: 'delete-manager', label: 'Delete Manager' },
 ];
 
@@ -503,6 +505,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
     'risk-watch': 'edit',
     'calendar': 'edit',
     'settings': 'edit',
+    'edit_bids': 'edit',
     'delete-manager': 'edit',
   },
   BID_TEAM: {
@@ -516,6 +519,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
     'risk-watch': 'view',
     'calendar': 'edit',
     'settings': 'none',
+    'edit_bids': 'edit',
     'delete-manager': 'none',
   },
   VIEWER: {
@@ -529,6 +533,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, SectionPermissions> = {
     'risk-watch': 'view',
     'calendar': 'view',
     'settings': 'none',
+    'edit_bids': 'none',
     'delete-manager': 'none',
   },
 };

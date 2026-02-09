@@ -14,6 +14,7 @@ interface BidLifecycleHeaderProps {
     setShowNoBidModal: (show: boolean) => void;
     stagesOrder: BidStage[];
     currentOfficialIndex: number;
+    onEditIntake?: () => void;
 }
 
 const BidLifecycleHeader: React.FC<BidLifecycleHeaderProps> = ({
@@ -25,7 +26,8 @@ const BidLifecycleHeader: React.FC<BidLifecycleHeaderProps> = ({
     handleProgressStage,
     setShowNoBidModal,
     stagesOrder,
-    currentOfficialIndex
+    currentOfficialIndex,
+    onEditIntake
 }) => {
     const navRef = useRef<HTMLElement>(null);
 
@@ -85,6 +87,15 @@ const BidLifecycleHeader: React.FC<BidLifecycleHeaderProps> = ({
                         className="flex items-center gap-2 px-6 py-2.5 text-[10px] font-black text-white bg-red-600 rounded-xl uppercase tracking-widest hover:bg-red-700 active:scale-95 transition-all shadow-lg shadow-red-100"
                     >
                         No-Bid <Flag size={14} />
+                    </button>
+                )}
+
+                {userRole !== 'VIEWER' && onEditIntake && (
+                    <button
+                        onClick={onEditIntake}
+                        className="flex items-center gap-2 px-6 py-2.5 text-[10px] font-black text-[#1E3A5F] bg-white border-2 border-[#1E3A5F] rounded-xl uppercase tracking-widest hover:bg-slate-50 active:scale-95 transition-all"
+                    >
+                        Edit Bid Info <CheckCircle2 size={14} className="rotate-180" />
                     </button>
                 )}
             </div>

@@ -37,6 +37,7 @@ const App: React.FC = () => {
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]); // Calendar events
   const [viewingBidId, setViewingBidId] = useState<string | null>(null);
   const [showIntake, setShowIntake] = useState(false);
+  const [editingBid, setEditingBid] = useState<BidRecord | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [initialStatusFilter, setInitialStatusFilter] = useState<string>('All');
@@ -267,6 +268,11 @@ const App: React.FC = () => {
         bid={currentBid}
         onUpdate={handleUpdateBid}
         onClose={() => setViewingBidId(null)}
+        onEditIntake={() => {
+          setEditingBid(currentBid);
+          setViewingBidId(null);
+          setShowIntake(true);
+        }}
         userRole={currentUser.role}
         addAuditLog={addAuditLog}
         currentUser={currentUser}
@@ -291,7 +297,20 @@ const App: React.FC = () => {
           <main className={clsx("flex-1 min-h-screen transition-all duration-300 ease-in-out", isSidebarCollapsed ? "ml-20" : "ml-64")}>
             {showIntake ? (
               <PermissionGuard section="bid-intake" requiredLevel="edit">
-                <BidIntake onCancel={() => setShowIntake(false)} onInitiate={handleInitiateBid} />
+                <BidIntake
+                  initialBid={editingBid || undefined}
+                  onCancel={() => {
+                    setShowIntake(false);
+                    setEditingBid(null);
+                  }}
+                  onInitiate={handleInitiateBid}
+                  onUpdate={async (updated) => {
+                    await handleUpdateBid(updated);
+                    setShowIntake(false);
+                    setEditingBid(null);
+                    setViewingBidId(updated.id);
+                  }}
+                />
               </PermissionGuard>
             ) : (
               <>

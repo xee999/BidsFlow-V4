@@ -10,10 +10,12 @@ import Toast, { ToastMessage } from './Toast.tsx';
 
 interface BidIntakeProps {
   onCancel: () => void;
-  onInitiate: (bid: BidRecord) => void;
+  onInitiate?: (bid: BidRecord) => void;
+  onUpdate?: (bid: BidRecord) => void;
+  initialBid?: BidRecord;
 }
 
-const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
+const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, initialBid }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -22,7 +24,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [duplicateCandidates, setDuplicateCandidates] = useState<any[]>([]);
-  const [formData, setFormData] = useState<Partial<BidRecord>>({
+  const [formData, setFormData] = useState<Partial<BidRecord>>(initialBid || {
     id: '',
     customerName: '',
     projectName: '',
@@ -250,6 +252,12 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
     setIsSubmitting(true);
 
     // Check for duplicates first
+    // Skip duplicate check if editing existing bid
+    if (initialBid) {
+      proceedWithSubmission();
+      return;
+    }
+
     try {
       const dupResult = await bidApi.checkDuplicate(formData.customerName!, formData.projectName!);
       if (dupResult.isDuplicate) {
@@ -267,52 +275,60 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
 
   const proceedWithSubmission = () => {
     setIsSubmitting(true);
-    const newBid: BidRecord = {
-      id: formData.id || ('bid-' + crypto.randomUUID()),
-      customerName: formData.customerName!,
-      projectName: formData.projectName!,
-      deadline: formData.deadline || new Date().toISOString().split('T')[0],
-      receivedDate: new Date().toISOString().split('T')[0],
-      status: BidStatus.ACTIVE,
-      currentStage: BidStage.INTAKE,
-      riskLevel: formData.riskLevel || RiskLevel.LOW,
-      estimatedValue: Number(formData.estimatedValue) || 0,
-      currency: formData.currency || 'PKR',
-      bidSecurity: formData.bidSecurity || '',
-      requiredSolutions: formData.requiredSolutions || [],
-      summaryRequirements: formData.summaryRequirements || '',
-      aiQualificationSummary: formData.aiQualificationSummary || '',
-      scopeOfWork: formData.scopeOfWork || '',
-      qualificationCriteria: formData.qualificationCriteria || '',
-      technicalQualificationChecklist: formData.technicalQualificationChecklist || [],
-      complianceChecklist: formData.complianceChecklist || [],
-      technicalDocuments: formData.technicalDocuments || [],
-      vendorQuotations: [],
-      financialFormats: formData.financialFormats || [],
-      daysInStages: { [BidStage.INTAKE]: 1 },
-      stageHistory: [{ stage: BidStage.INTAKE, timestamp: new Date().toISOString() }],
-      jbcName: formData.jbcName!,
-      channel: (formData.channel as any) || 'B2G',
-      region: (formData.region as any) || 'North',
-      contractDuration: formData.contractDuration,
-      customerPaymentTerms: formData.customerPaymentTerms,
-      publishDate: formData.publishDate || new Date().toISOString().split('T')[0],
-      complexity: formData.complexity || 'Medium',
-      preBidMeeting: formData.preBidMeeting,
-      deliverablesSummary: formData.deliverablesSummary,
-      managementApprovalStatus: 'Pending',
-      pricingApprovalStatus: 'Pending'
-    };
+    if (initialBid) {
+      onUpdate?.({
+        ...initialBid,
+        ...formData,
+        id: initialBid.id // Ensure ID never changes
+      } as BidRecord);
+    } else {
+      const newBid: BidRecord = {
+        id: formData.id || ('bid-' + crypto.randomUUID()),
+        customerName: formData.customerName!,
+        projectName: formData.projectName!,
+        deadline: formData.deadline || new Date().toISOString().split('T')[0],
+        receivedDate: new Date().toISOString().split('T')[0],
+        status: BidStatus.ACTIVE,
+        currentStage: BidStage.INTAKE,
+        riskLevel: formData.riskLevel || RiskLevel.LOW,
+        estimatedValue: Number(formData.estimatedValue) || 0,
+        currency: formData.currency || 'PKR',
+        bidSecurity: formData.bidSecurity || '',
+        requiredSolutions: formData.requiredSolutions || [],
+        summaryRequirements: formData.summaryRequirements || '',
+        aiQualificationSummary: formData.aiQualificationSummary || '',
+        scopeOfWork: formData.scopeOfWork || '',
+        qualificationCriteria: formData.qualificationCriteria || '',
+        technicalQualificationChecklist: formData.technicalQualificationChecklist || [],
+        complianceChecklist: formData.complianceChecklist || [],
+        technicalDocuments: formData.technicalDocuments || [],
+        vendorQuotations: [],
+        financialFormats: formData.financialFormats || [],
+        daysInStages: { [BidStage.INTAKE]: 1 },
+        stageHistory: [{ stage: BidStage.INTAKE, timestamp: new Date().toISOString() }],
+        jbcName: formData.jbcName!,
+        channel: (formData.channel as any) || 'B2G',
+        region: (formData.region as any) || 'North',
+        contractDuration: formData.contractDuration,
+        customerPaymentTerms: formData.customerPaymentTerms,
+        publishDate: formData.publishDate || new Date().toISOString().split('T')[0],
+        complexity: formData.complexity || 'Medium',
+        preBidMeeting: formData.preBidMeeting,
+        deliverablesSummary: formData.deliverablesSummary,
+        managementApprovalStatus: 'Pending',
+        pricingApprovalStatus: 'Pending'
+      };
 
-    onInitiate(newBid);
+      onInitiate?.(newBid);
+    }
   };
 
   return (
     <div className="p-8 max-w-6xl mx-auto bg-white rounded-3xl shadow-xl border border-slate-200 mt-10 mb-20 animate-in fade-in slide-in-from-bottom-4 duration-500 text-left">
       <div className="flex justify-between items-center mb-8 pb-4 border-b border-slate-100">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">New Bid Intake</h2>
-          <p className="text-slate-500 font-medium">AI-Powered Tender Analysis & Qualification</p>
+          <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-tight">{initialBid ? 'Edit Bid' : 'New Bid Intake'}</h2>
+          <p className="text-slate-500 font-medium">{initialBid ? 'Manual adjustment of bid records' : 'AI-Powered Tender Analysis & Qualification'}</p>
         </div>
         <button onClick={onCancel} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
           <X size={24} />
@@ -660,7 +676,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate }) => {
                 </>
               ) : (
                 <>
-                  Initiate Bid <ChevronDown className="-rotate-90" size={14} />
+                  {initialBid ? 'Update Bid' : 'Initiate Bid'} <ChevronDown className="-rotate-90" size={14} />
                 </>
               )}
             </button>
