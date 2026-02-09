@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { BidRecord, BidStage, BidStatus, TechnicalDocument, StageTransition, ComplianceItem, QualificationItem, RiskLevel, FinancialFormat, ApprovingAuthorityRole, ActivityLog, User } from '../types.ts';
 import { STAGE_ICONS } from '../constants.tsx';
-import { convertToDays, convertToYears, sanitizeDateValue, sanitizeTimeValue } from '../services/utils.ts';
+import { convertToDays, convertToYears, sanitizeDateValue, sanitizeTimeValue, calculateDaysInStages } from '../services/utils.ts';
 import JSZip from 'jszip';
 import { analyzePricingDocument, analyzeComplianceDocuments, generateFinalRiskAssessment, generateStrategicRiskAssessment, analyzeSolutioningDocuments, analyzeBidSecurityDocument, tagTechnicalDocuments, analyzeBidDocument } from '../services/gemini.ts';
 import FloatingAIChat from './FloatingAIChat.tsx';
@@ -176,7 +176,15 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
         ...(bid.stageHistory || []),
         { stage: nextStage, timestamp: new Date().toISOString() }
       ];
-      onUpdate({ ...bid, currentStage: nextStage, stageHistory: newHistory });
+
+      const newDaysInStages = calculateDaysInStages(bid.receivedDate, newHistory, nextStage);
+
+      onUpdate({
+        ...bid,
+        currentStage: nextStage,
+        stageHistory: newHistory,
+        daysInStages: newDaysInStages
+      });
       setViewingStage(nextStage);
 
       // Log stage transition

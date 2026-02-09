@@ -1,4 +1,4 @@
-import { BidRecord, BidStage } from '../types';
+import { BidRecord, BidStage, StageTransition } from '../types';
 
 /**
  * Utility functions for BidsFlow
@@ -194,4 +194,46 @@ export const getIntegrityColor = (score: number): string => {
     if (score >= 60) return '#FCD34D'; // Amber-300 (Subtle)
     if (score >= 30) return '#FDBA74'; // Orange-300 (Subtle)
     return '#FCA5A5'; // Red-300 (Subtle)
+};
+
+/**
+ * Accurately calculates days spent in each stage based on stage history.
+ * This is used to fix/override the stale 'daysInStages' field.
+ */
+export const calculateDaysInStages = (receivedDate: string, stageHistory: StageTransition[], currentStage: string): Record<string, number> => {
+    const days: Record<string, number> = {};
+    const startTimestamp = (stageHistory && stageHistory.length > 0)
+        ? new Date(stageHistory[0].timestamp).getTime()
+        : new Date(receivedDate).getTime();
+
+    if (!stageHistory || stageHistory.length === 0) {
+        const now = new Date().getTime();
+        days[currentStage] = Math.max(0.1, parseFloat(((now - startTimestamp) / (1000 * 60 * 60 * 24)).toFixed(1)));
+        return days;
+    }
+
+    // Process history chronologically
+    // History looks like: [{ stage: 'Intake', timestamp: T0 }, { stage: 'Qualification', timestamp: T1 }, ...]
+    for (let i = 0; i < stageHistory.length - 1; i++) {
+        const currentEntry = stageHistory[i];
+        const nextEntry = stageHistory[i + 1];
+
+        const start = new Date(currentEntry.timestamp).getTime();
+        const end = new Date(nextEntry.timestamp).getTime();
+
+        const diffDays = Math.max(0.1, parseFloat(((end - start) / (1000 * 60 * 60 * 24)).toFixed(1)));
+        days[currentEntry.stage] = (days[currentEntry.stage] || 0) + diffDays;
+    }
+
+    // Last entry to Now
+    const lastEntry = stageHistory[stageHistory.length - 1];
+    const start = new Date(lastEntry.timestamp).getTime();
+    const now = new Date().getTime();
+    const diffDaysNow = Math.max(0.1, parseFloat(((now - start) / (1000 * 60 * 60 * 24)).toFixed(1)));
+
+    // Safety check: if currentStage in record doesn't match last entry in history, treat last history as active
+    const activeStage = currentStage || lastEntry.stage;
+    days[activeStage] = (days[activeStage] || 0) + diffDaysNow;
+
+    return days;
 };

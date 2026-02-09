@@ -22,7 +22,7 @@ const SECTION_GROUPS = [
     {
         title: 'Core Operations',
         icon: <Layers size={14} className="text-blue-500" />,
-        sections: ['bid-intake', 'bid-stages', 'studio', 'vault', 'approvals'] as AppSection[]
+        sections: ['bid-intake', 'edit_bids', 'bid-stages', 'studio', 'vault', 'approvals'] as AppSection[]
     },
     {
         title: 'Analytics & Risk',
@@ -70,6 +70,7 @@ const RoleManagement: React.FC = () => {
             'reports': 'none',
             'risk-watch': 'none',
             'settings': 'none',
+            'edit_bids': 'none',
             'calendar': 'none',
             'delete-manager': 'none',
         }
@@ -107,6 +108,7 @@ const RoleManagement: React.FC = () => {
                 'reports': 'none',
                 'risk-watch': 'none',
                 'settings': 'none',
+                'edit_bids': 'none',
                 'calendar': 'none',
                 'delete-manager': 'none',
             }

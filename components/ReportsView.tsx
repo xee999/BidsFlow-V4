@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { BidRecord, BidStatus, BidStage } from '../types.ts';
 import { STAGE_ICONS, SOLUTION_OPTIONS } from '../constants.tsx';
+import { calculateDaysInStages } from '../services/utils.ts';
 import { analyzeNoBidReasons } from '../services/gemini.ts';
 import { clsx } from 'clsx';
 import BidTimeTrackerView from './BidTimeTrackerView.tsx';
@@ -234,8 +235,9 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
 
     // Detect bottleneck stage
     const stageTotals: Record<string, number> = {};
-    filteredBids.forEach(b => {
-      Object.entries(b.daysInStages || {}).forEach(([stage, days]: [string, any]) => {
+    filteredBids.forEach(bid => {
+      const daysInStages = calculateDaysInStages(bid.receivedDate, bid.stageHistory || [], bid.currentStage);
+      Object.entries(daysInStages).forEach(([stage, days]) => {
         stageTotals[stage] = (stageTotals[stage] || 0) + (days as number);
       });
     });
@@ -546,70 +548,73 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
                         <td className="px-12 py-10 max-w-xs"><div className="font-black text-slate-900 leading-tight text-lg group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div><div className="text-[11px] text-slate-400 font-bold uppercase mt-1 tracking-tight">{bid.customerName}</div></td>
                         <td className="px-12 py-10">
                           <div className="flex items-center w-full min-w-[500px] h-14 bg-slate-100 rounded-2xl p-1.5 border border-slate-200 relative shadow-inner">
-                            {Object.entries(bid.daysInStages || {}).map(([stage, days]: [string, any], idx, arr) => {
-                              // Find phase dates from history
-                              const historyIdx = bid.stageHistory?.findIndex(h => h.stage === (stage as any));
-                              const phaseStart = bid.stageHistory?.[historyIdx]?.timestamp || bid.receivedDate;
-                              const phaseEnd = bid.stageHistory?.[historyIdx + 1]?.timestamp ||
-                                (stage === bid.currentStage ? new Date().toISOString() : null);
+                            {(() => {
+                              const actualDaysInStages = calculateDaysInStages(bid.receivedDate, bid.stageHistory || [], bid.currentStage);
+                              return Object.entries(actualDaysInStages).map(([stage, days], idx, arr) => {
+                                // Find phase dates from history
+                                const historyIdx = bid.stageHistory?.findIndex(h => h.stage === (stage as any));
+                                const phaseStart = bid.stageHistory?.[historyIdx]?.timestamp || bid.receivedDate;
+                                const phaseEnd = bid.stageHistory?.[historyIdx + 1]?.timestamp ||
+                                  (stage === bid.currentStage ? new Date().toISOString() : null);
 
-                              return (
-                                <div
-                                  key={stage}
-                                  className={clsx(
-                                    "h-full flex items-center justify-center relative group/stage hover:brightness-110 transition-colors border-r border-white/20 last:border-0",
-                                    STAGE_COLORS[stage] || 'bg-slate-300',
-                                    idx === 0 ? "rounded-l-xl" : "",
-                                    idx === arr.length - 1 ? "rounded-r-xl" : "",
-                                    stage === bid.currentStage && "animate-pulse group-hover/row:animate-none"
-                                  )}
-                                  style={{ flex: (days as number) || 0.1 }}
-                                >
-                                  {(days as number) > 0 && (
-                                    <div className={clsx(
-                                      "opacity-0 group-hover/stage:opacity-100 absolute left-1/2 -translate-x-1/2 bg-white/95 text-slate-900 shadow-[0_30px_60px_rgba(0,0,0,0.2)] rounded-3xl z-[100] pointer-events-none w-72 border border-slate-200 backdrop-blur-xl transition-all p-6 scale-90 group-hover/stage:scale-100",
-                                      isFirst ? "top-full mt-6 origin-top" : "bottom-full mb-6 origin-bottom"
-                                    )}>
-                                      <div className="flex items-center gap-3 mb-4 border-b border-slate-100 pb-3">
-                                        <div className={clsx("p-2 rounded-lg text-white", STAGE_COLORS[stage] || 'bg-slate-400')}>
-                                          <Activity size={18} />
-                                        </div>
-                                        <div>
-                                          <div className="font-black uppercase tracking-widest text-slate-900 text-[11px]">{stage}</div>
-                                          <div className="text-[9px] text-slate-400 font-bold uppercase">Phase Velocity</div>
-                                        </div>
-                                      </div>
-
-                                      <div className="space-y-3">
-                                        <div className="flex justify-between items-center py-2 px-3 bg-slate-50 rounded-xl border border-slate-100">
-                                          <span className="text-[11px] text-slate-500 font-medium italic">Time Spent</span>
-                                          <span className="text-sm font-black text-slate-900">{days}d</span>
+                                return (
+                                  <div
+                                    key={stage}
+                                    className={clsx(
+                                      "h-full flex items-center justify-center relative group/stage hover:brightness-110 transition-colors border-r border-white/20 last:border-0",
+                                      STAGE_COLORS[stage] || 'bg-slate-300',
+                                      idx === 0 ? "rounded-l-xl" : "",
+                                      idx === arr.length - 1 ? "rounded-r-xl" : "",
+                                      stage === bid.currentStage && "animate-pulse group-hover/row:animate-none"
+                                    )}
+                                    style={{ flex: (days as number) || 0.1 }}
+                                  >
+                                    {(days as number) > 0 && (
+                                      <div className={clsx(
+                                        "opacity-0 group-hover/stage:opacity-100 absolute left-1/2 -translate-x-1/2 bg-white/95 text-slate-900 shadow-[0_30px_60px_rgba(0,0,0,0.2)] rounded-3xl z-[100] pointer-events-none w-72 border border-slate-200 backdrop-blur-xl transition-all p-6 scale-90 group-hover/stage:scale-100",
+                                        isFirst ? "top-full mt-6 origin-top" : "bottom-full mb-6 origin-bottom"
+                                      )}>
+                                        <div className="flex items-center gap-3 mb-4 border-b border-slate-100 pb-3">
+                                          <div className={clsx("p-2 rounded-lg text-white", STAGE_COLORS[stage] || 'bg-slate-400')}>
+                                            <Activity size={18} />
+                                          </div>
+                                          <div>
+                                            <div className="font-black uppercase tracking-widest text-slate-900 text-[11px]">{stage}</div>
+                                            <div className="text-[9px] text-slate-400 font-bold uppercase">Phase Velocity</div>
+                                          </div>
                                         </div>
 
-                                        <div className="grid grid-cols-1 gap-2">
-                                          <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                                            <div className="text-[9px] text-slate-400 font-black uppercase mb-2">Timeline Range</div>
-                                            <div className="text-xs font-black text-slate-800 flex flex-col gap-2">
-                                              <div className="flex justify-between">
-                                                <span className="text-slate-400 font-medium">Began:</span>
-                                                <span>{new Date(phaseStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                                              </div>
-                                              {phaseEnd && (
-                                                <div className="flex justify-between border-t border-slate-200/50 pt-2">
-                                                  <span className="text-slate-400 font-medium">Ended:</span>
-                                                  <span>{new Date(phaseEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                        <div className="space-y-3">
+                                          <div className="flex justify-between items-center py-2 px-3 bg-slate-50 rounded-xl border border-slate-100">
+                                            <span className="text-[11px] text-slate-500 font-medium italic">Time Spent</span>
+                                            <span className="text-sm font-black text-slate-900">{days}d</span>
+                                          </div>
+
+                                          <div className="grid grid-cols-1 gap-2">
+                                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                                              <div className="text-[9px] text-slate-400 font-black uppercase mb-2">Timeline Range</div>
+                                              <div className="text-xs font-black text-slate-800 flex flex-col gap-2">
+                                                <div className="flex justify-between">
+                                                  <span className="text-slate-400 font-medium">Began:</span>
+                                                  <span>{new Date(phaseStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                                                 </div>
-                                              )}
+                                                {phaseEnd && (
+                                                  <div className="flex justify-between border-t border-slate-200/50 pt-2">
+                                                    <span className="text-slate-400 font-medium">Ended:</span>
+                                                    <span>{new Date(phaseEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                                  </div>
+                                                )}
+                                              </div>
                                             </div>
                                           </div>
                                         </div>
                                       </div>
-                                    </div>
-                                  )}
-                                  <span className="text-[10px] font-black text-white shadow-sm">{(days as number) > 0 ? `${days}d` : ''}</span>
-                                </div>
-                              );
-                            })}
+                                    )}
+                                    <span className="text-[10px] font-black text-white shadow-sm">{(days as number) > 0 ? `${days}d` : ''}</span>
+                                  </div>
+                                );
+                              });
+                            })()}
                           </div>
                         </td>
                         <td className="px-12 py-10 text-right"><div className="text-3xl font-black text-slate-900">{totalDays}d</div><div className="text-[9px] font-bold text-slate-400 uppercase mt-1">Total Cycle</div></td>

@@ -15,7 +15,7 @@ import {
 import { BidRecord, BidStatus, BidStage } from '../types.ts';
 import { STAGE_COLORS } from './ReportsView.tsx';
 import { clsx } from 'clsx';
-import { sanitizeDateValue } from '../services/utils';
+import { sanitizeDateValue, calculateDaysInStages } from '../services/utils';
 
 interface BidTimeTrackerViewProps {
     bids: BidRecord[];
@@ -136,14 +136,15 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                         </thead>
                         <tbody className="divide-y divide-slate-50">
                             {bids.map((bid, index) => {
+                                const actualDaysInStages = calculateDaysInStages(bid.receivedDate, bid.stageHistory || [], bid.currentStage);
                                 const intakeLag = getDaysBetween(bid.publishDate, bid.receivedDate);
                                 const isFirst = index === 0;
                                 const teamTime = getDaysBetween(bid.receivedDate, bid.deadline);
                                 const totalWindow = getDaysBetween(bid.publishDate, bid.deadline) || 1;
 
-                                const currentPhaseDays = (bid.daysInStages?.[bid.currentStage] as number) || 1;
+                                const currentPhaseDays = actualDaysInStages[bid.currentStage] || 1;
                                 const targetDays = getPhaseTargetDays(teamTime, bid.complexity, bid.currentStage);
-                                const variance = currentPhaseDays - targetDays;
+                                const variance = parseFloat((currentPhaseDays - targetDays).toFixed(1));
                                 const isOverBudget = variance > 0;
 
                                 return (
@@ -197,9 +198,9 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
 
                                                     {/* Execution Horizon (Phases) */}
                                                     <div className="h-full flex-1 flex">
-                                                        {Object.entries(bid.daysInStages || {}).map(([stage, days]: [string, any]) => {
+                                                        {Object.entries(actualDaysInStages).map(([stage, days]) => {
                                                             const pTarget = getPhaseTargetDays(teamTime, bid.complexity, stage);
-                                                            const pVariance = (days as number) - pTarget;
+                                                            const pVariance = parseFloat(((days as number) - pTarget).toFixed(1));
                                                             return (
                                                                 <div
                                                                     key={stage}
