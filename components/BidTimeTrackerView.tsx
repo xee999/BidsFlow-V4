@@ -129,9 +129,9 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                     <table className="w-full text-left">
                         <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                             <tr>
-                                <th className="px-6 py-4 w-[20%]">Bid & Complexity</th>
-                                <th className="px-6 py-4 w-[60%]">Time Distribution (Market Horizon)</th>
-                                <th className="px-6 py-4 text-right w-[20%]">Phase Health</th>
+                                <th className="px-6 py-4 w-[12%]">Bid & Complexity</th>
+                                <th className="px-6 py-4 w-[73%]">Time Distribution (Market Horizon)</th>
+                                <th className="px-6 py-4 text-right w-[15%]">Phase Health</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
