@@ -116,7 +116,7 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                             <div className="w-3 h-3 rounded-full bg-slate-300"></div>
                             <span className="text-[10px] font-black text-slate-500 uppercase">Intake Lag</span>
                         </div>
-                        {Object.entries(STAGE_COLORS).slice(0, 4).map(([stage, color]) => (
+                        {Object.entries(STAGE_COLORS).map(([stage, color]) => (
                             <div key={stage} className="flex items-center gap-2">
                                 <div className={clsx("w-3 h-3 rounded-full", color)}></div>
                                 <span className="text-[10px] font-black text-slate-500 uppercase">{stage}</span>
@@ -129,9 +129,9 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                     <table className="w-full text-left">
                         <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                             <tr>
-                                <th className="px-12 py-8">Bid & Complexity</th>
-                                <th className="px-12 py-8">Time Distribution (Market Horizon)</th>
-                                <th className="px-12 py-8 text-right">Phase Health</th>
+                                <th className="px-6 py-4 w-[25%]">Bid & Complexity</th>
+                                <th className="px-6 py-4 w-[45%]">Time Distribution (Market Horizon)</th>
+                                <th className="px-6 py-4 text-right w-[30%]">Phase Health</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -149,21 +149,21 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
 
                                 return (
                                     <tr key={bid.id} className="group group/row hover:bg-slate-50/50 transition-all relative hover:z-[60]">
-                                        <td className="px-12 py-10">
-                                            <div className="font-black text-slate-900 leading-tight text-lg group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div>
-                                            <div className="flex items-center gap-2 mt-2">
+                                        <td className="px-6 py-6 align-top">
+                                            <div className="font-black text-slate-900 leading-tight text-sm group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div>
+                                            <div className="flex flex-wrap items-center gap-2 mt-2">
                                                 <span className={clsx(
                                                     "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border",
                                                     bid.complexity === 'High' ? "bg-red-50 text-red-600 border-red-100" :
                                                         bid.complexity === 'Medium' ? "bg-amber-50 text-amber-600 border-amber-100" :
                                                             "bg-emerald-50 text-emerald-600 border-emerald-100"
                                                 )}>
-                                                    {bid.complexity} Complexity
+                                                    {bid.complexity}
                                                 </span>
-                                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{bid.customerName}</span>
+                                                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">{bid.customerName}</span>
                                             </div>
                                         </td>
-                                        <td className="px-12 py-10 min-w-[500px]">
+                                        <td className="px-6 py-6 align-top">
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase px-1">
                                                     <span>{sanitizeDateValue(bid.publishDate) || bid.publishDate} (Published)</span>
@@ -269,7 +269,7 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-12 py-10 text-right">
+                                        <td className="px-6 py-6 text-right align-top">
                                             <div className="flex flex-col items-end">
                                                 <div className={clsx(
                                                     "flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest mb-2",
