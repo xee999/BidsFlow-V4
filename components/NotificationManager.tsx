@@ -11,35 +11,32 @@ import NotificationBell from './NotificationBell';
 import NotificationCenter from './NotificationCenter';
 
 interface NotificationManagerProps {
-    bids: BidRecord[];
-    events: CalendarEvent[];
+    notifications: BidNotification[];
+    unreadCount: number;
+    urgentCount: number;
+    markAsRead: (id: string) => void;
+    markAllAsRead: () => void;
+    dismiss: (id: string) => void;
+    clearAll: () => void;
+    permissionStatus: 'granted' | 'denied' | 'default';
+    requestPermission: () => Promise<void>;
     onNavigateToBid?: (bidId: string) => void;
 }
 
 export const NotificationManager: React.FC<NotificationManagerProps> = ({
-    bids,
-    events,
+    notifications,
+    unreadCount,
+    urgentCount,
+    markAsRead,
+    markAllAsRead,
+    dismiss,
+    clearAll,
+    permissionStatus,
+    requestPermission,
     onNavigateToBid
 }) => {
     const [isCenterOpen, setIsCenterOpen] = useState(false);
     const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
-
-    const {
-        notifications,
-        unreadCount,
-        urgentCount,
-        markAsRead,
-        markAllAsRead,
-        dismiss,
-        clearAll,
-        permissionStatus,
-        requestPermission,
-    } = useNotifications({
-        bids,
-        calendarEvents: events,
-        onNavigateToBid,
-        pollingIntervalMs: 60000 // 1 minute
-    });
 
     // Create portal container for the notification UI
     useEffect(() => {

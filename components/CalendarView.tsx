@@ -29,9 +29,26 @@ interface CalendarViewProps {
     currentUser: User | null;
     onUpdateBid: (bid: BidRecord) => Promise<void>;
     onViewBid: (id: string) => void;
+    events: CalendarEvent[];
+    setEvents: React.Dispatch<React.SetStateAction<CalendarEvent[]>>;
+    triggerMention?: (
+        mentionedUserId: string,
+        mentionerName: string,
+        bid: BidRecord,
+        noteId: string,
+        noteContent: string
+    ) => void;
 }
 
-const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdateBid, onViewBid }) => {
+const CalendarView: React.FC<CalendarViewProps> = ({
+    bids,
+    currentUser,
+    onUpdateBid,
+    onViewBid,
+    events,
+    setEvents,
+    triggerMention
+}) => {
     // DEBUG: Log received bids for calendar
     React.useEffect(() => {
         console.log("CalendarView mounted. Received bids:", bids.length);
@@ -526,6 +543,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdate
                                     if (isViewer) return;
                                     const bid = bids.find(b => b.id === showNotePad.bidId);
                                     if (bid && currentUser) {
+                                        const noteId = `note-${Date.now()}`;
                                         const content = noteContent || showNotePad.note?.content || '';
                                         if (!content.trim()) return;
                                         let updatedNotes = bid.notes || [];
@@ -536,7 +554,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdate
                                             );
                                         } else {
                                             const newNote: BidNote = {
-                                                id: `note-${Date.now()}`,
+                                                id: noteId,
                                                 content,
                                                 color: '#FEF3C7',
                                                 createdAt: new Date().toISOString(),
@@ -551,6 +569,13 @@ const CalendarView: React.FC<CalendarViewProps> = ({ bids, currentUser, onUpdate
                                             setSelectedBid(updatedBid);
                                         }
                                         onUpdateBid(updatedBid);
+
+                                        // Trigger notifications for mentioned users
+                                        if (triggerMention && noteMentionedUserIds.length > 0) {
+                                            noteMentionedUserIds.forEach(userId => {
+                                                triggerMention(userId, currentUser.name, bid, noteId, content);
+                                            });
+                                        }
                                     }
                                     setShowNotePad(null);
                                     setNoteContent('');

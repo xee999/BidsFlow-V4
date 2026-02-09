@@ -550,14 +550,14 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
                     const totalDays = getDaysBetween(startDate, endDate);
                     return (
                       <tr key={bid.id} className="group group/row hover:bg-slate-50/50 transition-all relative hover:z-[60]">
-                        <td className="px-6 py-6 align-top break-words">
-                          <div className="font-black text-slate-900 leading-tight text-sm group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div>
-                          <div className="text-[10px] text-slate-400 font-bold uppercase mt-2 tracking-tight flex flex-col gap-1">
-                            <span className="text-[9px] font-black text-slate-300 border-b border-slate-50 pb-1">{bid.id}</span>
-                            <span>{bid.customerName}</span>
+                        <td className="px-6 py-6 align-middle break-words">
+                          <div className="font-black text-slate-900 leading-tight text-base group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div>
+                          <div className="text-[11px] text-slate-400 font-bold uppercase mt-2 tracking-tight flex flex-col gap-1">
+                            <span className="text-[10px] font-black text-slate-300 border-b border-slate-100/50 pb-1">{bid.id}</span>
+                            <span className="text-[11px]">{bid.customerName}</span>
                           </div>
                         </td>
-                        <td className="px-6 py-6 align-top">
+                        <td className="px-6 py-6 align-middle">
                           <div className="flex items-center w-full min-w-[500px] h-14 bg-slate-100 rounded-2xl p-1.5 border border-slate-200 relative shadow-inner">
                             {(() => {
                               const actualDaysInStages = calculateDaysInStages(bid.receivedDate, bid.stageHistory || [], bid.currentStage);
@@ -628,7 +628,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ bids }) => {
                             })()}
                           </div>
                         </td>
-                        <td className="px-6 py-6 text-right align-top"><div className="text-2xl font-black text-slate-900 leading-none">{totalDays}d</div><div className="text-[9px] font-bold text-slate-400 uppercase mt-1">Total Cycle</div></td>
+                        <td className="px-6 py-6 text-right align-middle"><div className="text-2xl font-black text-slate-900 leading-none">{totalDays}d</div><div className="text-[9px] font-bold text-slate-400 uppercase mt-1">Total Cycle</div></td>
                       </tr>
                     );
                   })}

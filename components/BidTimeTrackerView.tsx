@@ -168,22 +168,22 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
 
                                 return (
                                     <tr key={bid.id} className="group group/row hover:bg-slate-50/50 transition-all relative hover:z-[60]">
-                                        <td className="px-4 py-6 align-top break-words">
-                                            <div className="font-black text-slate-900 leading-tight text-[11px] group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div>
+                                        <td className="px-4 py-6 align-middle break-words">
+                                            <div className="font-black text-slate-900 leading-tight text-[13px] group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</div>
                                             <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                                                <span className="text-[10px] font-black text-slate-400 border-b border-slate-100 pb-0.5 mb-1 w-full">{bid.id}</span>
+                                                <span className="text-[11px] font-black text-slate-400 border-b border-slate-100 pb-0.5 mb-1 w-full">{bid.id}</span>
                                                 <span className={clsx(
-                                                    "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest border shrink-0",
+                                                    "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border shrink-0",
                                                     bid.complexity === 'High' ? "bg-red-50 text-red-600 border-red-100" :
                                                         bid.complexity === 'Medium' ? "bg-amber-50 text-amber-600 border-amber-100" :
                                                             "bg-emerald-50 text-emerald-600 border-emerald-100"
                                                 )}>
                                                     {bid.complexity}
                                                 </span>
-                                                <span className="text-[8px] text-slate-400 font-bold uppercase tracking-tight truncate">{bid.customerName}</span>
+                                                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tight truncate">{bid.customerName}</span>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-6 align-top">
+                                        <td className="px-4 py-6 align-middle">
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase px-1">
                                                     <span>{sanitizeDateValue(bid.publishDate) || bid.publishDate} (Published)</span>
@@ -289,7 +289,7 @@ const BidTimeTrackerView: React.FC<BidTimeTrackerViewProps> = ({ bids }) => {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-6 text-right align-top">
+                                        <td className="px-4 py-6 text-right align-middle">
                                             <div className="flex flex-col items-end">
                                                 <div className={clsx(
                                                     "flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest mb-2",

@@ -33,6 +33,13 @@ interface BidLifecycleProps {
   addAuditLog?: (log: ActivityLog) => void;
   currentUser?: User;
   onEditIntake?: () => void;
+  triggerMention?: (
+    mentionedUserId: string,
+    mentionerName: string,
+    bid: BidRecord,
+    noteId: string,
+    noteContent: string
+  ) => void;
 }
 
 // Phase weights by complexity (total = 100%)
@@ -80,7 +87,7 @@ const getTimingStatus = (elapsed: number, target: number): { status: 'ahead' | '
   return { status: 'behind', color: 'bg-red-50 text-red-600 border-red-200' };
 };
 
-const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, userRole, addAuditLog, currentUser, onEditIntake }) => {
+const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, userRole, addAuditLog, currentUser, onEditIntake, triggerMention }) => {
   const [viewingStage, setViewingStage] = useState<BidStage>(bid.currentStage);
   const [showNoBidModal, setShowNoBidModal] = useState(false);
   const [showOutcomeModal, setShowOutcomeModal] = useState<'Won' | 'Lost' | null>(null);
@@ -1471,9 +1478,11 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                     className="w-full bg-white/80 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 font-medium h-24 focus:border-amber-400 transition-all"
                     onSubmit={() => {
                       if (newNoteContent.trim() && currentUser) {
+                        const noteId = `note-${Date.now()}`;
+                        const content = newNoteContent.trim();
                         const newNote = {
-                          id: `note-${Date.now()}`,
-                          content: newNoteContent.trim(),
+                          id: noteId,
+                          content,
                           color: '#FEF3C7',
                           createdAt: new Date().toISOString(),
                           createdBy: currentUser.name,
@@ -1481,6 +1490,14 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                         };
                         const updatedNotes = [...(bid.notes || []), newNote];
                         onUpdate({ ...bid, notes: updatedNotes });
+
+                        // Trigger notifications for mentioned users
+                        if (triggerMention && mentionedUserIds.length > 0) {
+                          mentionedUserIds.forEach(userId => {
+                            triggerMention(userId, currentUser.name, bid, noteId, content);
+                          });
+                        }
+
                         setNewNoteContent('');
                         setMentionedUserIds([]);
                         setIsAddingNote(false);
@@ -1501,9 +1518,11 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                     <button
                       onClick={() => {
                         if (newNoteContent.trim() && currentUser) {
+                          const noteId = `note-${Date.now()}`;
+                          const content = newNoteContent.trim();
                           const newNote = {
-                            id: `note-${Date.now()}`,
-                            content: newNoteContent.trim(),
+                            id: noteId,
+                            content,
                             color: '#FEF3C7',
                             createdAt: new Date().toISOString(),
                             createdBy: currentUser.name,
@@ -1511,6 +1530,14 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                           };
                           const updatedNotes = [...(bid.notes || []), newNote];
                           onUpdate({ ...bid, notes: updatedNotes });
+
+                          // Trigger notifications for mentioned users
+                          if (triggerMention && mentionedUserIds.length > 0) {
+                            mentionedUserIds.forEach(userId => {
+                              triggerMention(userId, currentUser.name, bid, noteId, content);
+                            });
+                          }
+
                           setNewNoteContent('');
                           setMentionedUserIds([]);
                           setIsAddingNote(false);

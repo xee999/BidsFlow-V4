@@ -22,6 +22,7 @@ import { Search, X, Calendar, Filter, Clock, Send, Trophy, ZapOff, Ban, Briefcas
 import { clsx } from 'clsx';
 import { bidApi, vaultApi, auditApi } from './services/api.ts';
 import { authService, userService } from './services/authService.ts';
+import { useNotifications } from './services/useNotifications.ts';
 import { auditActions, loadAuditLogs, saveAuditLogs } from './services/auditService.ts';
 import { PermissionProvider, PermissionGuard } from './components/PermissionGuard.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
@@ -41,6 +42,27 @@ const App: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [initialStatusFilter, setInitialStatusFilter] = useState<string>('All');
+
+  const {
+    notifications,
+    unreadCount,
+    urgentCount,
+    markAsRead,
+    markAllAsRead,
+    dismiss,
+    clearAll,
+    permissionStatus,
+    requestPermission,
+    triggerMention,
+    triggerStageTransition,
+    triggerStatusChange,
+    triggerNewBid
+  } = useNotifications({
+    bids,
+    calendarEvents,
+    onNavigateToBid: setViewingBidId,
+    pollingIntervalMs: 60000
+  });
 
   // Add audit log function - passed to components
   const addAuditLog = useCallback((log: ActivityLog) => {
@@ -261,30 +283,46 @@ const App: React.FC = () => {
     }
   };
 
-  if (viewingBidId) {
-    const currentBid = bids.find(b => b.id === viewingBidId);
-    if (currentBid) return (
-      <BidLifecycle
-        bid={currentBid}
-        onUpdate={handleUpdateBid}
-        onClose={() => setViewingBidId(null)}
-        onEditIntake={() => {
-          setEditingBid(currentBid);
-          setViewingBidId(null);
-          setShowIntake(true);
-        }}
-        userRole={currentUser.role}
-        addAuditLog={addAuditLog}
-        currentUser={currentUser}
-      />
-    );
-  }
 
   return (
     <ErrorBoundary>
       <PermissionProvider role={currentUser.role} customPermissions={currentUser.permissions}>
-        <NotificationManager bids={bids} events={calendarEvents} onNavigateToBid={handleSetViewingBidId} />
-        <div className="flex bg-[#F1F5F9] min-h-screen overflow-x-hidden">
+        <NotificationManager
+          notifications={notifications}
+          unreadCount={unreadCount}
+          urgentCount={urgentCount}
+          markAsRead={markAsRead}
+          markAllAsRead={markAllAsRead}
+          dismiss={dismiss}
+          clearAll={clearAll}
+          permissionStatus={permissionStatus}
+          requestPermission={requestPermission}
+          onNavigateToBid={handleSetViewingBidId}
+        />
+        <div className="flex bg-[#F1F5F9] min-h-screen overflow-x-hidden relative">
+          {viewingBidId && (
+            <div className="fixed inset-0 z-[100] bg-slate-900/10 backdrop-blur-sm overflow-y-auto">
+              {(() => {
+                const currentBid = bids.find(b => b.id === viewingBidId);
+                return currentBid ? (
+                  <BidLifecycle
+                    bid={currentBid}
+                    onUpdate={handleUpdateBid}
+                    onClose={() => setViewingBidId(null)}
+                    onEditIntake={() => {
+                      setEditingBid(currentBid);
+                      setViewingBidId(null);
+                      setShowIntake(true);
+                    }}
+                    userRole={currentUser.role}
+                    addAuditLog={addAuditLog}
+                    currentUser={currentUser}
+                    triggerMention={triggerMention}
+                  />
+                ) : null;
+              })()}
+            </div>
+          )}
           <Sidebar
             activeTab={activeTab}
             setActiveTab={setActiveTab}
@@ -362,6 +400,9 @@ const App: React.FC = () => {
                       currentUser={currentUser}
                       onUpdateBid={handleUpdateBid}
                       onViewBid={handleSetViewingBidId}
+                      events={calendarEvents}
+                      setEvents={setCalendarEvents}
+                      triggerMention={triggerMention}
                     />
                   </PermissionGuard>
                 )}
