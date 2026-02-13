@@ -1,0 +1,47 @@
+#!/usr/bin/expect -f
+set ip [lindex $argv 0]
+set port [lindex $argv 1]
+set password [lindex $argv 2]
+
+# Ensure we wait enough
+set timeout 60
+
+# Upload the file to /tmp/
+spawn scp -P $port deploy_garaj/nginx_default.conf root@$ip:/tmp/nginx_default.conf
+expect {
+  "password:" { 
+      send "$password\r"
+      expect {
+          "Permission denied" { puts "Access denied"; exit 1 }
+          eof { }
+      }
+  }
+  "refused" { puts "Connection refused"; exit 1 }
+  timeout { puts "SCP timed out"; exit 1 }
+}
+
+# SSH in to move it and restart
+spawn ssh -p $port root@$ip "mv /tmp/nginx_default.conf /etc/nginx/sites-available/default && systemctl restart nginx"
+expect {
+  "password:" { 
+      send "$password\r"
+      expect {
+          "Permission denied" { puts "Access denied"; exit 1 }
+          eof { }
+      }
+  }
+  "refused" { puts "Connection refused"; exit 1 }
+  timeout { puts "SSH command timed out"; exit 1 }
+}
+
+# Fix permissions separately just in case
+spawn ssh -p $port root@$ip "chown -R root:root /var/www/bidsflow"
+expect {
+  "password:" { 
+      send "$password\r"
+      expect {
+          "Permission denied" { puts "Access denied"; exit 1 }
+          eof { }
+      }
+  }
+}

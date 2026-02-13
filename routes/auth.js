@@ -4,6 +4,7 @@ import { User } from '../models/User.js';
 import { Role } from '../models/Role.js';
 import { authMiddleware } from '../middleware/auth.js';
 
+
 import rateLimit from 'express-rate-limit';
 
 const router = express.Router();
@@ -36,10 +37,19 @@ async function getUserWithRole(user) {
 // Login
 router.post('/login', loginLimiter, async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email: rawEmail, password } = req.body;
+        
+        if (!rawEmail || !password) {
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
+
+        const email = rawEmail.toLowerCase().trim();
+        console.log(`Login attempt for: ${email}`);
+
         const user = await User.findOne({ email });
 
         if (!user) {
+            console.warn(`Login failed: User not found for ${email}`);
             // Use generic error message for security
             return res.status(401).json({ error: 'Invalid email or password' });
         }
@@ -49,11 +59,14 @@ router.post('/login', loginLimiter, async (req, res) => {
             return res.status(500).json({ error: 'System error: User account configuration issue' });
         }
 
-        if (!(await user.comparePassword(password))) {
+        const isMatch = await user.comparePassword(password);
+        if (!isMatch) {
+            console.warn(`Login failed: Incorrect password for ${email}`);
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         if (!user.isActive) {
+            console.warn(`Login failed: Account deactivated for ${email}`);
             return res.status(401).json({ error: 'Account is deactivated' });
         }
 

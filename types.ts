@@ -145,9 +145,12 @@ export interface BidNote {
   id: string;
   content: string;
   color: string;
+  type?: 'note' | 'event' | 'reminder';
+  date?: string; // For calendar events/reminders
   createdAt: string;
   createdBy: string;
   mentionedUserIds?: string[]; // User IDs tagged with @mention
+  taggedBidIds?: string[]; // Bid IDs tagged with #mention
 }
 
 export interface CalendarEvent {
@@ -158,6 +161,14 @@ export interface CalendarEvent {
   color: string;
   description?: string;
   createdBy: string;
+  mentionedUserIds?: string[]; // User IDs tagged with @mention
+  taggedBidIds?: string[]; // Bid IDs tagged with #mention
+}
+
+export interface NoBidReason {
+  id: string;
+  label: string;
+  isDefault: boolean;
 }
 
 // ============================================
@@ -308,6 +319,7 @@ export interface FinalRiskReport {
 }
 
 export interface BidRecord {
+  _id?: string;
   id: string;
   customerName: string;
   projectName: string;
@@ -331,6 +343,7 @@ export interface BidRecord {
   financialFormats: FinancialFormat[];
   proposalSections?: ProposalSection[];
   noBidReason?: string;
+  noBidReasons?: string[];
   noBidReasonCategory?: string;
   noBidComments?: string;
   competitionPricing?: string;
@@ -375,6 +388,10 @@ export interface BidRecord {
   };
   phaseTargets?: Record<string, number>; // Calculated target days per phase
   notes?: BidNote[];
+  jvAllowed?: boolean;
+  bidSecurityStatus?: 'Pending' | 'Raised' | 'Ready';
+  bidSecurityRaisedDate?: string;
+  bidSecurityReadyDate?: string;
 }
 
 // User Role Types

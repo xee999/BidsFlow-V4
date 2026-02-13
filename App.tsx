@@ -16,11 +16,11 @@ import UserManagementPanel from './components/UserManagementPanel.tsx';
 import Login from './components/Login.tsx';
 import DeleteBidsView from './components/DeleteBidsView.tsx';
 import CalendarView from './components/CalendarView.tsx';
-import { BidRecord, BidStatus, BidStage, RiskLevel, User, ActivityLog, TechnicalDocument } from './types.ts';
+import { BidRecord, BidStatus, BidStage, RiskLevel, User, ActivityLog, TechnicalDocument, CalendarEvent } from './types.ts';
 import { NAV_ITEMS, SOLUTION_OPTIONS } from './constants.tsx';
 import { Search, X, Calendar, Filter, Clock, Send, Trophy, ZapOff, Ban, Briefcase, ChevronDown, Zap, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { bidApi, vaultApi, auditApi } from './services/api.ts';
+import { bidApi, vaultApi, auditApi, calendarApi } from './services/api.ts';
 import { authService, userService } from './services/authService.ts';
 import { useNotifications } from './services/useNotifications.ts';
 import { auditActions, loadAuditLogs, saveAuditLogs } from './services/auditService.ts';
@@ -60,6 +60,7 @@ const App: React.FC = () => {
   } = useNotifications({
     bids,
     calendarEvents,
+    currentUser,
     onNavigateToBid: setViewingBidId,
     pollingIntervalMs: 60000
   });
@@ -135,12 +136,87 @@ const App: React.FC = () => {
     loadData();
   }, [currentUser]);
 
+  // Periodic Silent Refresh for background sync (mentions, status updates, etc)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const [fetchedBids, fetchedEvents] = await Promise.all([
+          bidApi.getAll(),
+          fetch('/api/calendar-events').then(res => res.ok ? res.json() : [])
+        ]);
+        
+        // Only update if we are not currently viewing a bid to avoid flashing/resetting local state if they are editing
+        // Or we can be smarter, but simple replacement is what's used here
+        setBids(prev => {
+          // Intelligent merge: Update properties but preserve loaded documents/checklists if missing in new data
+          // This prevents heavy fields from "disappearing" when the summary GET /api/bids (which excludes them) runs.
+          const heavyFields = [
+            'technicalDocuments', 
+            'vendorQuotations', 
+            'financialFormats', 
+            'proposalSections', 
+            'technicalQualificationChecklist', 
+            'complianceChecklist',
+            'deliverablesSummary',
+            'notes',
+            'strategicRiskAssessment',
+            'finalRiskAssessment',
+            'solutioningAIAnalysis'
+          ];
+
+          const newBids = fetchedBids.map((newBid: BidRecord) => {
+            const existing = prev.find(p => p.id === newBid.id);
+            if (!existing) return newBid;
+
+            const merged = { ...newBid };
+            heavyFields.forEach(field => {
+              // @ts-ignore - dynamic field access
+              if (existing[field] && (!newBid[field] || (Array.isArray(newBid[field]) && newBid[field].length === 0))) {
+                // @ts-ignore
+                merged[field] = existing[field];
+              }
+            });
+            return merged;
+          });
+          
+          if (JSON.stringify(prev) === JSON.stringify(newBids)) return prev;
+          return newBids;
+        });
+        
+        setCalendarEvents(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(fetchedEvents)) return prev;
+          return fetchedEvents;
+        });
+      } catch (err) {
+        console.warn('Periodic data sync failed:', err);
+      }
+    }, 60000); // Sync every minute
+
+    return () => clearInterval(interval);
+  }, [currentUser]);
+
   const handleUpdateBid = async (updatedBid: BidRecord) => {
     try {
-      setBids(prev => prev.map(b => b.id === updatedBid.id ? updatedBid : b));
-      await bidApi.update(updatedBid);
+      // Find the original bid to see if the ID is changing
+      const originalBid = bids.find(b => b.projectName === updatedBid.projectName || b.customerName === updatedBid.customerName);
+      // However, a more reliable way is to store the editing bid's ID
+      const oldId = editingBid?.id || updatedBid.id;
+      
+      setBids(prev => prev.map(b => b.id === oldId ? updatedBid : b));
+      
+      // Fire and forget the update to the server (or handle errors in background)
+      bidApi.update(updatedBid, oldId).then(async () => {
+          // Sync calendar events in background
+          const updatedEvents = await calendarApi.getAll();
+          setCalendarEvents(updatedEvents);
+      }).catch(err => {
+          console.error('Background update failed:', err);
+          // Revert state if needed, or show error toast
+      });
     } catch (err) {
-      console.error('Failed to update bid:', err);
+      console.error('Failed to update bid state:', err);
     }
   };
 
@@ -163,9 +239,27 @@ const App: React.FC = () => {
 
   const handleDeleteBid = (deletedId: string) => {
     setBids(prev => prev.filter(b => b.id !== deletedId));
+    // Cascade delete in state: remove events linked to the deleted bid
+    setCalendarEvents(prev => prev.filter(event => 
+      !event.taggedBidIds || !event.taggedBidIds.includes(deletedId)
+    ));
+    
     if (currentUser) {
       const log = auditActions.bidUpdated(currentUser.name, currentUser.role, deletedId, 'Permanently Deleted');
       addAuditLog(log);
+    }
+  };
+
+  const handleSaveCalendarEvent = async (event: CalendarEvent) => {
+    try {
+      setCalendarEvents(prev => [...prev, event]);
+      await fetch('/api/calendar-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(event)
+      });
+    } catch (err) {
+      console.error('Failed to save calendar event:', err);
     }
   };
 
@@ -252,6 +346,11 @@ const App: React.FC = () => {
     setIsLoadingData(true);
     try {
       const fullBid = await bidApi.getById(id);
+      if (!fullBid) {
+        setViewingBidId(id);
+        return;
+      }
+
       // Update local bids collection with the full data, but preserve local notes if they haven't synced yet
       setBids(prev => prev.map(b => {
         if (b.id === id) {
@@ -300,29 +399,6 @@ const App: React.FC = () => {
           onNavigateToBid={handleSetViewingBidId}
         />
         <div className="flex bg-[#F1F5F9] min-h-screen overflow-x-hidden relative">
-          {viewingBidId && (
-            <div className="fixed inset-0 z-[100] bg-slate-900/10 backdrop-blur-sm overflow-y-auto">
-              {(() => {
-                const currentBid = bids.find(b => b.id === viewingBidId);
-                return currentBid ? (
-                  <BidLifecycle
-                    bid={currentBid}
-                    onUpdate={handleUpdateBid}
-                    onClose={() => setViewingBidId(null)}
-                    onEditIntake={() => {
-                      setEditingBid(currentBid);
-                      setViewingBidId(null);
-                      setShowIntake(true);
-                    }}
-                    userRole={currentUser.role}
-                    addAuditLog={addAuditLog}
-                    currentUser={currentUser}
-                    triggerMention={triggerMention}
-                  />
-                ) : null;
-              })()}
-            </div>
-          )}
           <Sidebar
             activeTab={activeTab}
             setActiveTab={setActiveTab}
@@ -342,8 +418,8 @@ const App: React.FC = () => {
                     setEditingBid(null);
                   }}
                   onInitiate={handleInitiateBid}
-                  onUpdate={async (updated) => {
-                    await handleUpdateBid(updated);
+                  onUpdate={(updated) => {
+                    handleUpdateBid(updated);
                     setShowIntake(false);
                     setEditingBid(null);
                     setViewingBidId(updated.id);
@@ -428,6 +504,35 @@ const App: React.FC = () => {
             )}
           </main>
         </div>
+        {viewingBidId && (
+          <div 
+            className="fixed inset-0 bg-slate-900/80 backdrop-blur-2xl overflow-y-auto"
+            style={{ zIndex: 1000000 }}
+          >
+            {(() => {
+              const currentBid = bids.find(b => b.id === viewingBidId);
+              return currentBid ? (
+                <BidLifecycle
+                  bid={currentBid}
+                  onUpdate={handleUpdateBid}
+                  onClose={() => setViewingBidId(null)}
+                  onEditIntake={() => {
+                    setEditingBid(currentBid);
+                    setViewingBidId(null);
+                    setShowIntake(true);
+                  }}
+                  userRole={currentUser.role}
+                  addAuditLog={addAuditLog}
+                  currentUser={currentUser}
+                  triggerMention={triggerMention}
+                  onViewBid={handleSetViewingBidId}
+                  onAddCalendarEvent={handleSaveCalendarEvent}
+                  bids={bids}
+                />
+              ) : null;
+            })()}
+          </div>
+        )}
       </PermissionProvider>
     </ErrorBoundary>
   );

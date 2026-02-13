@@ -34,6 +34,10 @@ const DeleteBidsView: React.FC<DeleteBidsViewProps> = ({ bids, onDeleteSuccess }
             const matchesSearch = !query ||
                 (bid.projectName && bid.projectName.toLowerCase().includes(query)) ||
                 (bid.customerName && bid.customerName.toLowerCase().includes(query)) ||
+                (bid.jbcName && bid.jbcName.toLowerCase().includes(query)) ||
+                (bid.region && bid.region.toLowerCase().includes(query)) ||
+                (bid.channel && bid.channel.toLowerCase().includes(query)) ||
+                (bid.complexity && bid.complexity.toLowerCase().includes(query)) ||
                 (bid.id && bid.id.toLowerCase().includes(query));
 
             // 2. Status Filter

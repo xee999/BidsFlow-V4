@@ -9,7 +9,7 @@ import {
   FolderOpen, Hash, Trash2,
   FileCode, ShieldCheck, Database, Activity,
   Calendar, Users, BadgeDollarSign, Megaphone,
-  FileBox, Globe, Zap
+  FileBox, Globe, Zap, Upload
 } from 'lucide-react';
 import { TechnicalDocument } from '../types.ts';
 import { indexVaultDocument } from '../services/gemini.ts';
@@ -21,7 +21,9 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; us
   const [activeCategory, setActiveCategory] = useState<string>('All Documents');
   const [editingAsset, setEditingAsset] = useState<TechnicalDocument | null>(null);
   const [viewingAsset, setViewingAsset] = useState<TechnicalDocument | null>(null);
+  const [sortBy, setSortBy] = useState<'name' | 'date' | 'size' | 'usage'>('date');
   const [isIndexing, setIsIndexing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const dynamicCategories = useMemo(() => {
@@ -37,18 +39,32 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; us
   }, [assets]);
 
   const filteredAssets = useMemo(() => {
-    return assets.filter(a => {
+    let result = assets.filter(a => {
       const matchesSearch = a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         a.tags?.some(t => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
         a.category?.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = activeCategory === 'All Documents' || a.category === activeCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [assets, searchTerm, activeCategory]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    return result.sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
+      if (sortBy === 'date') return new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime();
+      if (sortBy === 'usage') return (b.timesUsed || 0) - (a.timesUsed || 0);
+      if (sortBy === 'size') {
+        const parseSize = (s: string = '') => {
+          const val = parseFloat(s) || 0;
+          if (s.toLowerCase().includes('gb')) return val * 1024 * 1024;
+          if (s.toLowerCase().includes('mb')) return val * 1024;
+          return val;
+        };
+        return parseSize(b.fileSize) - parseSize(a.fileSize);
+      }
+      return 0;
+    });
+  }, [assets, searchTerm, activeCategory, sortBy]);
+
+  const processFile = async (file: File) => {
     setIsIndexing(true);
     const reader = new FileReader();
     reader.onload = async () => {
@@ -78,6 +94,39 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; us
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (userRole !== 'VIEWER') setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    if (userRole === 'VIEWER') return;
+
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      await processFile(file);
+    }
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await processFile(file);
+      e.target.value = '';
+    }
   };
 
   const handleUpdateAsset = async (e: React.FormEvent) => {
@@ -158,7 +207,26 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; us
   };
 
   return (
-    <div className="h-screen flex flex-col bg-[#F8FAFC] overflow-hidden text-left font-sans">
+    <div 
+      className={clsx(
+        "h-screen flex flex-col transition-all duration-300 font-sans relative",
+        isDragging ? "bg-red-50/50" : "bg-[#F8FAFC]"
+      )}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center p-12 pointer-events-none">
+          <div className="w-full h-full border-4 border-dashed border-[#D32F2F] rounded-[4rem] bg-white/60 backdrop-blur-sm flex flex-col items-center justify-center animate-in zoom-in duration-300">
+            <div className="w-32 h-32 bg-red-50 rounded-full flex items-center justify-center mb-6 shadow-xl text-[#D32F2F]">
+              <Upload size={64} className="animate-bounce" />
+            </div>
+            <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter mb-2">Drop to Upload</h2>
+            <p className="text-sm font-black text-slate-400 uppercase tracking-[0.3em]">AI will index and tag your document automatically</p>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="px-10 py-8 flex flex-col gap-6 bg-white border-b border-slate-100 shrink-0">
         <div className="flex items-center justify-between">
@@ -196,6 +264,27 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; us
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-[#F1F5F9] border-2 border-transparent rounded-[1.5rem] py-5 pl-16 pr-8 text-sm font-bold focus:bg-white focus:border-slate-100 transition-all shadow-inner outline-none"
             />
+          </div>
+
+          {/* Sort Controls */}
+          <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
+            {[
+              { id: 'date', label: 'Date', icon: <Clock size={14} /> },
+              { id: 'name', label: 'Name', icon: <Hash size={14} /> },
+              { id: 'usage', label: 'Usage', icon: <Activity size={14} /> },
+              { id: 'size', label: 'Size', icon: <FileBox size={14} /> }
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setSortBy(opt.id as any)}
+                className={clsx(
+                  "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                  sortBy === opt.id ? "bg-white text-[#D32F2F] shadow-sm border border-slate-100" : "text-slate-400 hover:text-slate-600"
+                )}
+              >
+                {opt.icon} {opt.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>

@@ -396,7 +396,7 @@ const ProposalStudio: React.FC<ProposalStudioProps> = ({ bids, onUpdateBid, vaul
               className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-5 py-3 text-xs font-black text-slate-700 focus:ring-4 focus:ring-red-50 focus:border-[#D32F2F] outline-none appearance-none cursor-pointer hover:bg-white transition-all shadow-inner truncate"
             >
               <option value="" disabled>Activate Opportunity Context...</option>
-              {activeBids.map(b => <option key={b.id} value={b.id}>{b.projectName}</option>)}
+              {activeBids.map(b => <option key={b.id} value={b.id}>{b.id} - {b.projectName}</option>)}
             </select>
             <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none group-focus-within:rotate-180 transition-transform" />
           </div>

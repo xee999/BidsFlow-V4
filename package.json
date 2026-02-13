@@ -8,7 +8,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "server": "tsx --env-file=.env server.js",
-    "start": "node --env-file=.env server.js"
+    "start": "node --env-file=.env server.js",
+    "deploy:prod": "./deploy_garaj/go_garaj.sh",
+    "deploy:code": "./deploy_garaj/deploy_code_only.sh"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

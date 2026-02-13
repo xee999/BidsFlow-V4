@@ -1,7 +1,7 @@
 import React from 'react';
-import { Target, Briefcase, Activity, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Target, Briefcase, Activity, ChevronRight, ChevronLeft, Ban } from 'lucide-react';
 import { clsx } from 'clsx';
-import { BidRecord, BidStage } from '../../types';
+import { BidRecord, BidStage, BidStatus } from '../../types';
 import { sanitizeDateValue } from '../../services/utils';
 
 interface StatBoxProps {
@@ -44,11 +44,49 @@ const BidLifecycleSidebar: React.FC<BidLifecycleSidebarProps> = ({
             </div>
             {!sidebarCollapsed && (
                 <div className="flex-1 overflow-y-auto p-6 space-y-8 scrollbar-hide">
+                    <div className="space-y-4">
+                        <div className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
+                            <div>
+                                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Customer Name</p>
+                                <p className="text-sm font-black text-slate-200 leading-tight">{bid.customerName}</p>
+                            </div>
+                            <div className="pt-3 border-t border-white/5">
+                                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Bid ID</p>
+                                <p className="text-sm font-black text-[#D32F2F] tracking-wider uppercase truncate">{bid.id}</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <div>
-                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Target size={14} className="text-red-400" /> Current Bid Status</h4>
-                        <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-center justify-between">
-                            <div><p className="text-[9px] font-black text-red-200 uppercase tracking-widest">Official Phase</p><p className="text-sm font-black text-white">{bid.currentStage}</p></div>
-                            <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center animate-pulse"><Activity size={14} /></div>
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                            <Target size={14} className={clsx(bid.status === BidStatus.NO_BID ? "text-slate-400" : "text-red-400")} /> 
+                            {bid.status === BidStatus.NO_BID ? 'Discontinued Status' : 'Current Bid Status'}
+                        </h4>
+                        <div className={clsx(
+                            "border rounded-2xl p-4 flex items-center justify-between transition-all duration-500",
+                            bid.status === BidStatus.NO_BID 
+                                ? "bg-slate-800 border-slate-700 shadow-inner" 
+                                : "bg-red-500/10 border-red-500/20 shadow-sm"
+                        )}>
+                            <div>
+                                <p className={clsx(
+                                    "text-[10px] font-black uppercase tracking-widest",
+                                    bid.status === BidStatus.NO_BID ? "text-slate-500" : "text-red-200"
+                                )}>
+                                    {bid.status === BidStatus.NO_BID ? 'Project Status' : 'Official Phase'}
+                                </p>
+                                <p className="text-lg font-black text-white">
+                                    {bid.status === BidStatus.NO_BID ? 'NO-BID' : bid.currentStage}
+                                </p>
+                            </div>
+                            <div className={clsx(
+                                "w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all duration-500",
+                                bid.status === BidStatus.NO_BID 
+                                    ? "bg-slate-700 text-slate-400" 
+                                    : "bg-red-500 text-white animate-pulse shadow-red-500/20"
+                            )}>
+                                {bid.status === BidStatus.NO_BID ? <Ban size={18} /> : <Activity size={18} />}
+                            </div>
                         </div>
                     </div>
 
@@ -56,12 +94,12 @@ const BidLifecycleSidebar: React.FC<BidLifecycleSidebarProps> = ({
                         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Strategic Brief</h4>
                         <div className="bg-white/5 rounded-2xl p-4 border border-white/10 space-y-3">
                             {/* Scrollable Strategic Brief without changing card size */}
-                            <div className="max-h-[88px] overflow-y-auto scrollbar-hide pr-1 outline-none">
-                                <p className="text-[11px] text-slate-300 leading-relaxed font-medium">
+                            <div className="max-h-[120px] overflow-y-auto scrollbar-hide pr-1 outline-none">
+                                <p className="text-[13px] text-slate-300 leading-relaxed font-medium">
                                     {bid.summaryRequirements || 'No summary.'}
                                 </p>
                             </div>
-                            <div className="flex flex-wrap gap-1.5">{(bid.requiredSolutions || []).map(s => <span key={s} className="px-2 py-0.5 bg-red-500/20 text-red-200 text-[8px] font-black uppercase rounded border border-red-500/30">{s}</span>)}</div>
+                            <div className="flex flex-wrap gap-2">{(bid.requiredSolutions || []).map(s => <span key={s} className="px-3 py-1 bg-red-500/20 text-red-200 text-[10px] font-black uppercase rounded-lg border border-red-500/30 shadow-sm">{s}</span>)}</div>
                         </div>
                     </div>
 
@@ -79,9 +117,20 @@ const BidLifecycleSidebar: React.FC<BidLifecycleSidebarProps> = ({
                         <StatBox label={bid.tcvExclTax ? "Bid Value" : "Est. Value"} value={`PKR ${((bid.tcvExclTax || bid.estimatedValue) / 1000000).toFixed(1)}M`} color="text-white" />
                     </div>
 
-                    <div className="pt-4 mt-auto">
+                    <div className="pt-4 mt-auto space-y-3">
+                        <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex justify-between items-center">
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">JV Allowed</p>
+                            <span className={clsx(
+                                "text-[10px] font-black uppercase px-3 py-1 rounded-lg border transition-all duration-500 shadow-sm",
+                                bid.jvAllowed 
+                                    ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 ring-1 ring-emerald-500/10" 
+                                    : "bg-slate-800 text-slate-500 border-slate-700"
+                            )}>
+                                {bid.jvAllowed ? 'YES' : 'NO'}
+                            </span>
+                        </div>
                         <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
-                            <p className="text-[9px] font-black text-slate-500 uppercase mb-1">JBC Manager</p>
+                            <p className="text-[9px] font-black text-slate-500 uppercase mb-1">JBC</p>
                             <p className="text-xs font-black text-slate-200">{bid.jbcName}</p>
                         </div>
                     </div>

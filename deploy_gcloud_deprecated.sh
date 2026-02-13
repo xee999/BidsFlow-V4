@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# WARNING: DEPRECATED SCRIPT
+echo "⚠️  WARNING: This Google Cloud deployment script is DEPRECATED."
+echo "⚠️  We have migrated to Garaj Cloud."
+echo "⚠️  Please use ./deploy_garaj/go_garaj.sh instead."
+echo "Exiting..."
+exit 1
+
 # Usage: ./deploy.sh [staging|production]
 
 ENV=$1

@@ -23,27 +23,20 @@ View your app in AI Studio: https://ai.studio/apps/drive/1CZa5p1Imns8ZGl-LqgshKq
 
 ## 🛡️ Developer Guidelines & Protocols
 
-### 1. Deployment Protocol (The "Staging First" Rule)
-**NEVER deploy directly to Production.**
+### 1. Deployment Protocol (GARAJ PRODUCTION)
+**NOTE: We have migrated from Google Cloud to Garaj as our primary Production Environment.**
+
 1.  **Develop Locally**: `npm run dev`
-2.  **Deploy to Staging**:
-    ```bash
-    gcloud run deploy bidsflow-staging --project gen-lang-client-0197652040
-    ```
-    *   *Verify*: Check https://bidsflow-staging-661116307651.us-central1.run.app
-3.  **Promote to Production**:
-    ```bash
-    gcloud run deploy bidsflow-app --project gen-lang-client-0197652040
-    ```
+2.  **Deploy to Garaj Production**:
+    *   **Deployment Script**: `./deploy_garaj/go_garaj.sh`
+    *   *Note*: This script allows full provisioning. For code-only updates, use `./deploy_garaj/deploy_code_only.sh`.
+    *   *Verify*: Check http://119.160.105.120
 
 ### 2. Data Safety & Backups
-*   **Production DB**: Self-hosted VM at `34.172.151.20`.
-*   **Backup Server**: Secondary VM at `136.111.109.139` (Internal: `10.128.0.3`).
-*   **Automation**: A cron job runs daily at 03:00 AM on Prod, dumping data and `scp`ing it to Backup Server.
-*   **Emergency Backup Command** (Run on Prod VM):
-    ```bash
-    ./mongo_backup.sh
-    ```
+*   **Production Environment**: Garaj VMs.
+*   **Database**: MongoDB hosted on Garaj DB VM (`119.160.105.121`).
+*   **Application**: Hosted on Garaj App VM (`119.160.105.120`).
+*   **Backups**: Maintained within the Garaj infrastructure.
 
 ### 3. Business Logic (Revenue Streams)
 When updating classifiers, ensure these 3 keys are always maintained:

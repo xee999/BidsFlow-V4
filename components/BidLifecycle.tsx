@@ -7,9 +7,9 @@ import {
   FileSpreadsheet, Package, BadgeDollarSign, Plus, Briefcase, Layers,
   FileBox, ClipboardList, FileSearch, FileBadge, ExternalLink, Filter,
   Activity, Calculator, Lock, Archive, Tag, Trash2, Flag, Award, ThumbsUp,
-  MapPin, Banknote, Landmark, StickyNote, X
+  MapPin, Banknote, Landmark, StickyNote, X, Ban
 } from 'lucide-react';
-import { BidRecord, BidStage, BidStatus, TechnicalDocument, StageTransition, ComplianceItem, QualificationItem, RiskLevel, FinancialFormat, ApprovingAuthorityRole, ActivityLog, User } from '../types.ts';
+import { BidRecord, BidStage, BidStatus, TechnicalDocument, StageTransition, ComplianceItem, QualificationItem, RiskLevel, FinancialFormat, ApprovingAuthorityRole, ActivityLog, User, CalendarEvent, NoBidReason } from '../types.ts';
 import { STAGE_ICONS } from '../constants.tsx';
 import { convertToDays, convertToYears, sanitizeDateValue, sanitizeTimeValue, calculateDaysInStages } from '../services/utils.ts';
 import JSZip from 'jszip';
@@ -23,6 +23,7 @@ import NoBidModal from './bid-lifecycle/NoBidModal';
 import OutcomeModal from './bid-lifecycle/OutcomeModal';
 import DeleteAssetModal from './bid-lifecycle/DeleteAssetModal';
 import MentionInput from './MentionInput';
+import RichText from './RichText';
 import { userService } from '../services/authService.ts';
 
 interface BidLifecycleProps {
@@ -40,6 +41,9 @@ interface BidLifecycleProps {
     noteId: string,
     noteContent: string
   ) => void;
+  bids?: BidRecord[];
+  onViewBid?: (bidId: string) => void;
+  onAddCalendarEvent?: (event: CalendarEvent) => Promise<void>;
 }
 
 // Phase weights by complexity (total = 100%)
@@ -53,9 +57,27 @@ const PHASE_WEIGHTS: Record<string, Record<string, number>> = {
 
 // Calculate target days for each phase based on available time and complexity
 // Rounds to 0.5 day increments (e.g., 1, 1.5, 2, 2.5)
+// Helper to safely format dates without crashing on "Invalid Date"
+const formatSafeDate = (dateOrStr: Date | string | undefined | null, options?: Intl.DateTimeFormatOptions, locale: string = 'en-GB'): string => {
+  if (!dateOrStr) return 'N/A';
+  const date = dateOrStr instanceof Date ? dateOrStr : new Date(dateOrStr);
+  if (isNaN(date.getTime())) return 'N/A';
+  try {
+    return date.toLocaleDateString(locale, options);
+  } catch (e) {
+    return date.toLocaleDateString();
+  }
+};
+
 const calculatePhaseTargets = (deadline: string, receivedDate: string, complexity: string = 'Medium'): Record<string, number> => {
   const deadlineDate = new Date(deadline);
   const startDate = new Date(receivedDate);
+
+  // If dates are invalid, return a default balanced plan
+  if (isNaN(deadlineDate.getTime()) || isNaN(startDate.getTime())) {
+    return { Intake: 0.5, Qualification: 1, Solutioning: 10, Pricing: 3, Compliance: 3, 'Final Review': 0.5 };
+  }
+
   deadlineDate.setHours(0, 0, 0, 0);
   startDate.setHours(0, 0, 0, 0);
   // T-2: Reserve 2 days before deadline (1 for final review buffer + 1 for submission)
@@ -87,13 +109,12 @@ const getTimingStatus = (elapsed: number, target: number): { status: 'ahead' | '
   return { status: 'behind', color: 'bg-red-50 text-red-600 border-red-200' };
 };
 
-const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, userRole, addAuditLog, currentUser, onEditIntake, triggerMention }) => {
+const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, userRole, addAuditLog, currentUser, onEditIntake, triggerMention, bids = [], onViewBid, onAddCalendarEvent }) => {
   const [viewingStage, setViewingStage] = useState<BidStage>(bid.currentStage);
   const [showNoBidModal, setShowNoBidModal] = useState(false);
   const [showOutcomeModal, setShowOutcomeModal] = useState<'Won' | 'Lost' | null>(null);
 
-  const [noBidCategory, setNoBidCategory] = useState("");
-  const [noBidComments, setNoBidComments] = useState("");
+  const [globalReasons, setGlobalReasons] = useState<NoBidReason[]>([]);
   const [compPricing, setCompPricing] = useState("");
   const [learnings, setLearnings] = useState("");
 
@@ -109,14 +130,25 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
   const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [newNoteContent, setNewNoteContent] = useState('');
   const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
+  const [taggedBidIds, setTaggedBidIds] = useState<string[]>([]);
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [activeNoteType, setActiveNoteType] = useState<'note' | 'event' | 'reminder'>('note');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [isDraggingSecurity, setIsDraggingSecurity] = useState(false);
 
   // Fetch users for @mention dropdown
   useEffect(() => {
     userService.getAll()
       .then(users => setAllUsers(users))
       .catch(err => console.warn('Failed to load users for mentions:', err));
+
+    // Fetch global no-bid reasons
+    fetch('/api/no-bid-reasons')
+      .then(res => res.json())
+      .then(data => setGlobalReasons(data))
+      .catch(err => console.error('Failed to load no-bid reasons:', err));
   }, []);
 
   const navRef = useRef<HTMLDivElement>(null);
@@ -240,19 +272,36 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
     onClose();
   };
 
-  const handleSetNoBid = () => {
-    if (!noBidCategory) return alert("Please select a reason category.");
+  const handleSetNoBid = (payload: { reasons: string[], comments: string }) => {
+    if (payload.reasons.length === 0) return alert("Please select at least one reason.");
+    
+    // For backward compatibility and single-line display in lists
+    const primaryReason = payload.reasons[0];
+    
     const updatedBid: BidRecord = {
       ...bid,
       status: BidStatus.NO_BID,
-      noBidReasonCategory: noBidCategory,
-      noBidReason: noBidCategory,
-      noBidComments: noBidComments,
+      noBidReasonCategory: primaryReason,
+      noBidReason: primaryReason,
+      noBidReasons: payload.reasons,
+      noBidComments: payload.comments,
       noBidStage: bid.currentStage
     };
     onUpdate(updatedBid);
     setShowNoBidModal(false);
     onClose();
+  };
+
+  const handleAddCustomReason = async (label: string) => {
+    const res = await fetch('/api/no-bid-reasons', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label })
+    });
+    if (!res.ok) throw new Error('Failed to save reason');
+    const newReason = await res.json();
+    setGlobalReasons(prev => [...prev, newReason]);
+    return newReason;
   };
 
   const runStrategicRiskAssessment = async () => {
@@ -283,9 +332,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
     }
   };
 
-  const handleBidSecurityUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processBidSecurityFile = async (file: File) => {
     setIsAnalyzing(true);
     setIsAnalyzingBidSecurity(true);
     setScanningStatus("Analyzing Bid Security...");
@@ -329,17 +376,22 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
         setIsAnalyzingBidSecurity(false);
         setIsAnalyzing(false);
         setScanningStatus(null);
-        if (e.target) e.target.value = "";
       }
     };
     reader.readAsDataURL(file);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, category: string) => {
-    if (category === 'BidSecurity') return handleBidSecurityUpload(e);
-
+  const handleBidSecurityUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (file) {
+      await processBidSecurityFile(file);
+      e.target.value = "";
+    }
+  };
+
+  const processGeneralFile = async (file: File, category: string) => {
+    if (category === 'BidSecurity') return processBidSecurityFile(file);
+
     setIsAnalyzing(true);
     setScanningStatus("Initializing...");
 
@@ -456,8 +508,6 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
 
           if (checklistItems.length > 0) {
             const criteria = bid.summaryRequirements || `Compliance evaluation for ${bid.projectName} with ${bid.customerName}.`;
-            // USE extractedDocs explicitly to ensure they are scanned if total docs is large? 
-            // Better to use currentBidDocs which contains everything.
             const complianceResult = await analyzeComplianceDocuments(criteria, checklistItems, currentBidDocs);
 
             if (complianceResult?.updatedChecklist) {
@@ -469,8 +519,6 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                 if (aiItem.status === 'Complete' && aiItem.id) {
                   const complianceIdx = updatedCompliance.findIndex(c => c.id === aiItem.id);
                   const technicalIdx = updatedTechnical.findIndex(t => t.id === aiItem.id);
-
-
 
                   if (complianceIdx !== -1) {
                     updatedCompliance[complianceIdx] = { ...updatedCompliance[complianceIdx], status: 'Complete', aiComment: aiItem.aiComment };
@@ -497,7 +545,6 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
       } finally {
         setIsAnalyzing(false);
         setScanningStatus(null);
-        if (e.target) e.target.value = "";
       }
       return;
     }
@@ -618,8 +665,6 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
           let updatedTechnical = [...(bid.technicalQualificationChecklist || [])];
 
           if (result?.updatedChecklist) {
-
-
             result.updatedChecklist.forEach((aiItem: any) => {
               if (aiItem.status === 'Complete' && aiItem.id) {
                 // ID-Based Matching
@@ -663,10 +708,17 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
       } finally {
         setIsAnalyzing(false);
         setScanningStatus(null);
-        if (e.target) e.target.value = "";
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, category: string) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await processGeneralFile(file, category);
+      e.target.value = "";
+    }
   };
 
   const runFinalRiskAssessment = async () => {
@@ -736,7 +788,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
     return colors[Math.abs(hash) % colors.length];
   };
 
-  const securityDocs = useMemo(() => bid.technicalDocuments.filter(d => d.type === 'Bid Security Instrument'), [bid.technicalDocuments]);
+  const securityDocs = useMemo(() => (bid.technicalDocuments || []).filter(d => d.type === 'Bid Security Instrument'), [bid.technicalDocuments]);
   const latestSecurityDoc = securityDocs[securityDocs.length - 1];
 
   const securityData = useMemo(() => {
@@ -773,13 +825,46 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
           viewingStage={viewingStage}
           setViewingStage={setViewingStage}
           onClose={onClose}
-          userRole={userRole}
           handleProgressStage={handleProgressStage}
           setShowNoBidModal={setShowNoBidModal}
-          onEditIntake={onEditIntake}
           stagesOrder={stagesOrder}
           currentOfficialIndex={currentOfficialIndex}
+          userRole={userRole}
+          onEditIntake={onEditIntake}
         />
+
+        {bid.status === BidStatus.NO_BID && (
+          <div 
+            onClick={() => setShowNoBidModal(true)}
+            className="bg-slate-900 border-b border-slate-700 px-8 py-3 flex items-center justify-between sticky top-0 z-50 shadow-lg cursor-pointer hover:bg-slate-800 transition-all group"
+          >
+            <div className="flex items-center gap-4">
+              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-500/20 text-red-500 group-hover:scale-110 transition-transform">
+                <Ban size={18} />
+              </div>
+              <div>
+                <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em] leading-tight flex items-center gap-2">
+                  Opportunity Discontinued
+                  <span className="text-[8px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity ml-2">Click to Edit</span>
+                </h3>
+                <p className="text-[11px] font-bold text-slate-400 mt-0.5">
+                  Reason: <span className="text-red-400">
+                    {bid.noBidReasons && bid.noBidReasons.length > 0 
+                      ? bid.noBidReasons.join(', ') 
+                      : (bid.noBidReasonCategory || 'Not specified')}
+                  </span>
+                  {bid.noBidComments && <span className="mx-2 text-slate-600">|</span>}
+                  <span className="text-slate-300 italic">{bid.noBidComments}</span>
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-[9px] font-black text-slate-500 uppercase tracking-widest group-hover:border-slate-500 transition-colors">
+                Inactive Lifecycle
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-8 space-y-10 scrollbar-hide pb-60 text-left">
           {/* Phase Header with Timing Badge */}
@@ -845,7 +930,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                           <MapPin size={10} />
                           <span className="text-[9px] font-black uppercase tracking-wider">
                             {bid.preBidMeeting?.date && !isNaN(new Date(bid.preBidMeeting.date).getTime())
-                              ? `Pre-Bid: ${new Date(bid.preBidMeeting.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+                            ? `Pre-Bid: ${formatSafeDate(bid.preBidMeeting.date, { month: 'short', day: 'numeric' })}`
                               : "Pre-Bid Meeting: No"}
                           </span>
 
@@ -1006,7 +1091,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                                         <p className="text-[11px] font-black uppercase tracking-wider mb-1" style={{ color: phase.textColor }}>{phase.name}</p>
                                         <p className="text-xl font-black text-slate-800">{phase.days} days</p>
                                         <p className="text-[10px] font-medium text-slate-400 mt-1">
-                                          Target: <span className="font-bold text-slate-600">{phase.endDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                                          Target: <span className="font-bold text-slate-600">{formatSafeDate(phase.endDate, { day: '2-digit', month: 'short', year: 'numeric' })}</span>
                                         </p>
                                       </div>
                                     </div>
@@ -1032,7 +1117,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                               <div className="bg-red-600 flex items-center justify-center text-white min-w-[80px] relative group rounded-r-2xl">
                                 <div className="text-center">
                                   <p className="text-[8px] font-bold uppercase tracking-wider opacity-80">SUBMIT</p>
-                                  <p className="text-[10px] font-black">{deadlineDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</p>
+                                  <p className="text-[10px] font-black">{formatSafeDate(deadlineDate, { day: '2-digit', month: 'short' })}</p>
                                 </div>
 
                                 {/* Deadline Hover Card */}
@@ -1040,7 +1125,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                                   <div className="bg-red-600 px-4 py-3 rounded-xl shadow-2xl border-2 border-red-700">
                                     <div className="bg-white rounded-lg p-3">
                                       <p className="text-[10px] font-black uppercase tracking-wider text-red-600 mb-1">Submission Deadline</p>
-                                      <p className="text-lg font-black text-slate-800">{deadlineDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                      <p className="text-lg font-black text-slate-800">{formatSafeDate(deadlineDate, { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                                     </div>
                                   </div>
                                   <div className="absolute top-full right-4 w-3 h-3 rotate-45 -mt-1.5 bg-red-600" />
@@ -1103,16 +1188,32 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                     <div
                       onClick={() => !isPreviewingFuture && userRole !== 'VIEWER' && refs.bidSecurity.current?.click()}
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (userRole !== 'VIEWER') setIsDraggingSecurity(true); }}
+                      onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingSecurity(false); }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDraggingSecurity(false);
+                        if (userRole === 'VIEWER') return;
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) processBidSecurityFile(file);
+                      }}
                       className={clsx(
-                        "group bg-[#1E3A5F] rounded-[2.5rem] border-2 border-dashed border-white/20 p-10 text-center shadow-xl transition-all relative overflow-hidden flex flex-col justify-center min-h-[460px]",
-                        userRole !== 'VIEWER' ? "hover:border-[#FFC107] hover:bg-white/5 cursor-pointer" : "cursor-default"
+                        "group bg-[#1E3A5F] rounded-[2.5rem] border-2 border-dashed p-10 text-center shadow-xl transition-all relative overflow-hidden flex flex-col justify-center min-h-[460px]",
+                        userRole !== 'VIEWER' ? "hover:border-[#FFC107] hover:bg-white/5 cursor-pointer" : "cursor-default",
+                        isDraggingSecurity ? "border-[#FFC107] bg-white/10 scale-[1.02]" : "border-white/20"
                       )}
                     >
                       <div className="absolute top-0 right-0 p-8 opacity-10"><Landmark size={80} className="text-white" /></div>
-                      <div className="w-20 h-20 bg-white/10 rounded-3xl flex items-center justify-center mx-auto mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all">
+                      <div className={clsx(
+                        "w-20 h-20 bg-white/10 rounded-3xl flex items-center justify-center mx-auto mb-6 transition-all",
+                        isDraggingSecurity ? "bg-white/20 scale-110" : "group-hover:scale-110 group-hover:bg-white/20"
+                      )}>
                         {isAnalyzingBidSecurity ? <Loader2 className="animate-spin text-[#FFC107]" size={36} /> : <FileUp size={36} className={clsx(userRole !== 'VIEWER' ? "text-[#FFC107]" : "text-slate-500")} />}
                       </div>
-                      <h4 className="text-xl font-black text-white uppercase mb-2 tracking-tight group-hover:text-[#FFC107]">{userRole !== 'VIEWER' ? "Upload Instrument" : "Instrument View"}</h4>
+                      <h4 className="text-xl font-black text-white uppercase mb-2 tracking-tight group-hover:text-[#FFC107]">
+                        {isDraggingSecurity ? "Drop Instrument" : userRole !== 'VIEWER' ? "Upload Instrument" : "Instrument View"}
+                      </h4>
                       <p className="text-[10px] text-white/40 font-black uppercase tracking-widest leading-relaxed">PDF, PNG, JPG, JPEG</p>
                       <div className="mt-8 pt-8 border-t border-white/10 text-left">
                         <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-2">RFP Requirement</p>
@@ -1181,9 +1282,9 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
 
                 <StageSection title="Regulatory & Compliance Assets" icon={<ShieldCheck className="text-blue-500" />}>
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.compliance.current?.click()} title="Compliance Docs" desc="Legal & Tax Credentials" loading={isAnalyzing} status={scanningStatus} icon={<ShieldCheck size={24} className={clsx(userRole !== 'VIEWER' ? "text-blue-500" : "text-slate-400")} />} />
-                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.annexure.current?.click()} title="Annexures" desc="RFP Specific Appendices" loading={isAnalyzing} status={scanningStatus} icon={<FileBox size={24} className={clsx(userRole !== 'VIEWER' ? "text-amber-500" : "text-slate-400")} />} />
-                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.supporting.current?.click()} title="Supporting Docs" desc="Any other bid collateral" loading={isAnalyzing} status={scanningStatus} icon={<Layers size={24} className={clsx(userRole !== 'VIEWER' ? "text-indigo-500" : "text-slate-400")} />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.compliance.current?.click()} onFileDrop={(f) => processGeneralFile(f, 'Compliance')} title="Compliance Docs" desc="Legal & Tax Credentials" loading={isAnalyzing} status={scanningStatus} icon={<ShieldCheck size={24} className={clsx(userRole !== 'VIEWER' ? "text-blue-500" : "text-slate-400")} />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.annexure.current?.click()} onFileDrop={(f) => processGeneralFile(f, 'Annexure')} title="Annexures" desc="RFP Specific Appendices" loading={isAnalyzing} status={scanningStatus} icon={<FileBox size={24} className={clsx(userRole !== 'VIEWER' ? "text-amber-500" : "text-slate-400")} />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.supporting.current?.click()} onFileDrop={(f) => processGeneralFile(f, 'Supporting')} title="Supporting Docs" desc="Any other bid collateral" loading={isAnalyzing} status={scanningStatus} icon={<Layers size={24} className={clsx(userRole !== 'VIEWER' ? "text-indigo-500" : "text-slate-400")} />} />
                   </div>
                 </StageSection>
               </div>
@@ -1195,7 +1296,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                   <StageSection title="General Compliance Requirements" icon={<ShieldCheck className="text-blue-500" />}>
                     {(bid.complianceChecklist || []).length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                        {bid.complianceChecklist.map((item, idx) => (
+                        {(bid.complianceChecklist || []).map((item, idx) => (
                           <DetailedChecklistCard
                             key={`comp-${idx}`}
                             item={item}
@@ -1212,24 +1313,82 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                     )}
                   </StageSection>
 
-                  <StageSection title="Technical Qualification Requirements" icon={<CheckSquare className="text-amber-500" />}>
-                    {(bid.technicalQualificationChecklist || []).length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                        {bid.technicalQualificationChecklist.map((item, idx) => (
-                          <DetailedChecklistCard
-                            key={`tech-${idx}`}
-                            item={item}
-                            type="technical"
-                            onToggle={() => !isPreviewingFuture && toggleItemStatus('technical', idx)}
-                            readOnly={isPreviewingFuture}
-                          />
-                        ))}
+                  <StageSection title="Bid Security" icon={<ShieldCheck className="text-emerald-500" />}>
+                    <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 shadow-sm text-left">
+                      <div className="flex flex-col gap-6">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status Tracking</h4>
+                          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                            {[
+                              { id: 'Pending', label: 'Pending' },
+                              { id: 'Raised', label: 'Request Sent' },
+                              { id: 'Ready', label: 'Ready' }
+                            ].map((status) => (
+                              <button
+                                key={status.id}
+                                onClick={() => {
+                                  if (userRole === 'VIEWER') return;
+                                  const now = new Date().toISOString();
+                                  const updates: Partial<BidRecord> = {
+                                    bidSecurityStatus: status.id as 'Pending' | 'Raised' | 'Ready'
+                                  };
+                                  if (status.id === 'Raised') updates.bidSecurityRaisedDate = now;
+                                  if (status.id === 'Ready') updates.bidSecurityReadyDate = now;
+                                  onUpdate({ ...bid, ...updates });
+                                }}
+                                className={clsx(
+                                  "px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap",
+                                  (bid.bidSecurityStatus || 'Pending') === status.id
+                                    ? "bg-white shadow-sm text-emerald-600"
+                                    : "text-slate-400 hover:text-slate-600"
+                                )}
+                              >
+                                {status.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 pt-4 border-t border-slate-50">
+                          <div className="flex items-center gap-3">
+                            <div className={clsx("w-2 h-2 rounded-full", (bid.bidSecurityStatus || 'Pending') === 'Pending' ? "bg-amber-500" : "bg-slate-200")}></div>
+                            <p className="text-sm font-bold text-slate-700">Bid Security - Pending</p>
+                          </div>
+                          
+                          {bid.bidSecurityRaisedDate && (
+                            <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left-2 transition-all">
+                              <div className={clsx("w-2 h-2 rounded-full", bid.bidSecurityStatus === 'Raised' ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" : "bg-emerald-500")}></div>
+                              <p className="text-sm font-bold text-slate-700">
+                                Bid Security : Raised - <span className="text-slate-500 font-medium">
+                                  {new Date(bid.bidSecurityRaisedDate).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })} on {(() => {
+                                    const d = new Date(bid.bidSecurityRaisedDate);
+                                    const day = d.getDate();
+                                    const suffix = day % 10 === 1 && day !== 11 ? 'st' : day % 10 === 2 && day !== 12 ? 'nd' : day % 10 === 3 && day !== 13 ? 'rd' : 'th';
+                                    return `${day}${suffix} ${d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}`;
+                                  })()}
+                                </span>
+                              </p>
+                            </div>
+                          )}
+
+                          {bid.bidSecurityReadyDate && (
+                            <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left-2 transition-all">
+                              <div className={clsx("w-2 h-2 rounded-full", bid.bidSecurityStatus === 'Ready' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-emerald-500")}></div>
+                              <p className="text-sm font-bold text-slate-700">
+                                Bid Security : Ready - <span className="text-slate-500 font-medium">
+                                  {new Date(bid.bidSecurityReadyDate).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })} on {(() => {
+                                    const d = new Date(bid.bidSecurityReadyDate);
+                                    const day = d.getDate();
+                                    const suffix = day % 10 === 1 && day !== 11 ? 'st' : day % 10 === 2 && day !== 12 ? 'nd' : day % 10 === 3 && day !== 13 ? 'rd' : 'th';
+                                    return `${day}${suffix} ${d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}`;
+                                  })()}
+                                </span>
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    ) : (
-                      <div className="p-12 text-center border border-dashed border-slate-200 rounded-[2rem] bg-slate-50/30">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No technical qualification items detected.</p>
-                      </div>
-                    )}
+                    </div>
                   </StageSection>
                 </div>
 
@@ -1281,8 +1440,8 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
               <StageSection title="Solutioning & Architecture" icon={<Zap className="text-amber-500" />}>
                 <div className="space-y-10">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.technical.current?.click()} title="Technical Proposal" desc="Upload narrative & diagrams" loading={isAnalyzing} status={scanningStatus} icon={<FileText size={24} className={clsx(userRole !== 'VIEWER' ? "text-blue-500" : "text-slate-400")} />} />
-                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.vendor.current?.click()} title="Vendor Quotes" desc="Upload OEM prices" loading={isAnalyzing} status={scanningStatus} icon={<Briefcase size={24} className={clsx(userRole !== 'VIEWER' ? "text-[#D32F2F]" : "text-slate-400")} />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.technical.current?.click()} onFileDrop={(f) => processGeneralFile(f, 'Technical')} title="Technical Proposal" desc="Upload narrative & diagrams" loading={isAnalyzing} status={scanningStatus} icon={<FileText size={24} className={clsx(userRole !== 'VIEWER' ? "text-blue-500" : "text-slate-400")} />} />
+                    <UploadPortal onClick={() => userRole !== 'VIEWER' && refs.vendor.current?.click()} onFileDrop={(f) => processGeneralFile(f, 'Vendor')} title="Vendor Quotes" desc="Upload OEM prices" loading={isAnalyzing} status={scanningStatus} icon={<Briefcase size={24} className={clsx(userRole !== 'VIEWER' ? "text-[#D32F2F]" : "text-slate-400")} />} />
                   </div>
                   <div className="bg-slate-900 rounded-[3rem] p-10 text-white relative overflow-hidden shadow-2xl">
                     <div className="flex items-center justify-between mb-8">
@@ -1351,9 +1510,24 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                         </div>
                       </div>
                     </div>
-                    <div className="bg-[#1E3A5F] rounded-[2.5rem] p-8 text-white text-left">
+                    <div 
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (userRole !== 'VIEWER') setIsDraggingSecurity(true); }}
+                      onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingSecurity(false); }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDraggingSecurity(false);
+                        if (userRole === 'VIEWER') return;
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) processGeneralFile(file, 'Pricing');
+                      }}
+                      className={clsx(
+                        "bg-[#1E3A5F] rounded-[2.5rem] p-8 text-white text-left transition-all border-2 border-transparent",
+                        isDraggingSecurity && "border-[#FFC107] bg-white/10 scale-[1.02]"
+                      )}
+                    >
                       <h4 className="text-xs font-black uppercase tracking-widest mb-6 flex items-center gap-2"><Sparkles size={16} className="text-[#FFC107]" /> Pricing Tool</h4>
-                      <p className="text-[10px] text-slate-400 mb-8 leading-relaxed font-medium">AI will extract commercial schedules and auto-calculate TCV.</p>
+                      <p className="text-[10px] text-slate-400 mb-8 leading-relaxed font-medium">AI will extract commercial schedules and auto-calculate TCV. Drag & drop supports bulk scan.</p>
                       <button onClick={() => userRole !== 'VIEWER' && refs.pricing.current?.click()} className={clsx("w-full py-4 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg transition-all flex items-center justify-center gap-3", userRole === 'VIEWER' ? "bg-slate-700 cursor-default" : "bg-[#D32F2F] hover:bg-red-700")}>{isAnalyzing ? <Loader2 className="animate-spin" size={16} /> : <FileUp size={16} />} {userRole === 'VIEWER' ? "Price Sheet View" : "Upload Price Sheet"}</button>
                     </div>
                   </div>
@@ -1389,7 +1563,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
               <div className="space-y-12 animate-in fade-in duration-500">
                 <div className="max-w-2xl mx-auto py-10 text-center space-y-10">
                   {bid.status === BidStatus.SUBMITTED ? (
-                    <div className="bg-white rounded-[4rem] p-16 shadow-2xl border border-slate-200 border-t-8 border-t-emerald-500"><div className="w-24 h-24 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-8"><CheckCircle2 size={56} /></div><h3 className="text-3xl font-black text-slate-900 mb-2 uppercase tracking-tight">Bid Submitted</h3><p className="text-slate-500 font-black tracking-widest uppercase text-[11px] mt-4">Recorded: {formatSimpleDate(bid.submissionDate)}</p><div className="mt-12 pt-10 border-t border-slate-100 flex flex-col items-center gap-6"><p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Decision</p><div className="flex items-center gap-4 w-full"><button onClick={() => setShowOutcomeModal('Won')} className="flex-1 flex items-center justify-center gap-3 px-8 py-5 text-xs font-black text-white bg-emerald-600 rounded-3xl uppercase tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-100">Bid Won <Trophy size={18} /></button><button onClick={() => setShowOutcomeModal('Lost')} className="flex-1 flex items-center justify-center gap-3 px-8 py-5 text-xs font-black text-slate-600 bg-white border border-slate-200 rounded-3xl uppercase tracking-widest hover:bg-slate-50 shadow-sm">Bid Lost <ThumbsDown size={18} /></button></div></div></div>
+                    <div className="bg-white rounded-[4rem] p-16 shadow-2xl border border-slate-200 border-t-8 border-t-emerald-500"><div className="w-24 h-24 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-8"><CheckCircle2 size={56} /></div><h3 className="text-3xl font-black text-slate-900 mb-2 uppercase tracking-tight">Bid Submitted</h3><p className="text-slate-500 font-black tracking-widest uppercase text-[11px] mt-4">Recorded: {formatSimpleDate(bid.submissionDate)}</p><div className="mt-12 pt-10 border-t border-slate-100 flex flex-col items-center gap-6"><p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Decision</p><div className="flex items-center gap-4 w-full"><button onClick={() => setShowOutcomeModal('Won')} className="flex-1 flex items-center justify-center gap-3 px-8 py-5 text-xs font-black text-white bg-emerald-600 rounded-3xl uppercase tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-100">Bid Won <Trophy size={18} /></button><button onClick={() => setShowOutcomeModal('Lost')} className="flex-1 flex items-center justify-center gap-3 px-8 py-5 text-xs font-black text-white bg-red-600 rounded-3xl uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-100">Bid Lost <ThumbsDown size={18} /></button></div></div></div>
                   ) : bid.status === BidStatus.WON || bid.status === BidStatus.LOST || bid.status === BidStatus.NO_BID ? (
                     <div className="bg-white rounded-[4rem] p-16 shadow-2xl border border-slate-200 border-t-8 border-t-slate-800"><div className="w-24 h-24 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-8">{bid.status === BidStatus.WON ? <Trophy size={56} className="text-emerald-500" /> : <ThumbsDown size={56} className="text-red-500" />}</div><h3 className="text-3xl font-black text-slate-900 mb-2 uppercase tracking-tight">Bid Closed</h3><p className="text-slate-500 font-black tracking-widest uppercase text-[11px] mt-4">Status: {bid.status}</p></div>
                   ) : (
@@ -1419,7 +1593,7 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
               <div className="flex items-center gap-3"><Archive className="text-slate-400" size={24} /><h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Bid Assets Portfolio</h3></div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pb-20">
-              {bid.technicalDocuments.map(doc => (
+              {(bid.technicalDocuments || []).map(doc => (
                 <div key={doc.id} className="bg-white p-5 rounded-[2rem] border border-slate-200 hover:border-[#D32F2F] transition-all group shadow-sm flex flex-col h-full text-left">
                   <div className="flex items-center gap-4 mb-4">
                     <div className="p-3 bg-slate-50 rounded-xl text-slate-400 group-hover:text-[#D32F2F] transition-all"><FileText size={20} /></div>
@@ -1465,71 +1639,114 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
               {/* Add Note Form */}
               {isAddingNote && (
                 <div className="mb-6 p-5 bg-amber-50 border border-amber-200 rounded-2xl">
-                  <MentionInput
-                    value={newNoteContent}
-                    onChange={(value, userIds) => {
-                      setNewNoteContent(value);
-                      setMentionedUserIds(userIds);
-                    }}
-                    users={allUsers}
-                    placeholder="Write your note here... Use @ to mention team members"
-                    autoFocus
-                    rows={4}
-                    className="w-full bg-white/80 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 font-medium h-24 focus:border-amber-400 transition-all"
-                    onSubmit={() => {
-                      if (newNoteContent.trim() && currentUser) {
-                        const noteId = `note-${Date.now()}`;
-                        const content = newNoteContent.trim();
-                        const newNote = {
-                          id: noteId,
-                          content,
-                          color: '#FEF3C7',
-                          createdAt: new Date().toISOString(),
-                          createdBy: currentUser.name,
-                          mentionedUserIds: mentionedUserIds
-                        };
-                        const updatedNotes = [...(bid.notes || []), newNote];
-                        onUpdate({ ...bid, notes: updatedNotes });
 
-                        // Trigger notifications for mentioned users
-                        if (triggerMention && mentionedUserIds.length > 0) {
-                          mentionedUserIds.forEach(userId => {
-                            triggerMention(userId, currentUser.name, bid, noteId, content);
-                          });
-                        }
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        {[
+                          { id: 'note', label: 'Note', icon: StickyNote, color: 'text-amber-600', activeBg: 'bg-white shadow-sm' },
+                          { id: 'event', label: 'Event', icon: Activity, color: 'text-blue-600', activeBg: 'bg-white shadow-sm' },
+                          { id: 'reminder', label: 'Reminder', icon: Clock, color: 'text-purple-600', activeBg: 'bg-white shadow-sm' }
+                        ].map((type) => (
+                          <button
+                            key={type.id}
+                            onClick={() => setActiveNoteType(type.id as any)}
+                            className={clsx(
+                              "flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                              activeNoteType === type.id ? `${type.activeBg} ${type.color}` : "text-slate-400 hover:text-slate-600"
+                            )}
+                          >
+                            <type.icon size={14} />
+                            {type.label}
+                          </button>
+                        ))}
+                      </div>
 
-                        setNewNoteContent('');
-                        setMentionedUserIds([]);
-                        setIsAddingNote(false);
-                      }
-                    }}
-                  />
+                      {activeNoteType !== 'note' && (
+                        <div className="flex items-center gap-2 bg-slate-100 px-4 py-1.5 rounded-xl border border-slate-200 animate-in fade-in slide-in-from-left-2 duration-300">
+                          <Clock size={14} className="text-slate-400" />
+                          <input
+                            type="date"
+                            value={selectedDate}
+                            onChange={(e) => setSelectedDate(e.target.value)}
+                            className="bg-transparent text-xs font-bold text-slate-700 outline-none"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <MentionInput
+                      value={newNoteContent}
+                      onChange={(val, mentions, tags) => {
+                        setNewNoteContent(val);
+                        setMentionedUserIds(mentions);
+                        setTaggedBidIds(tags);
+                      }}
+                      users={allUsers}
+                      bids={bids}
+                      placeholder={activeNoteType === 'note' ? "Write a note... Use @ to mention team members, # to tag other bids." : `Describe this ${activeNoteType}...`}
+                      autoFocus
+                      rows={4}
+                      className={clsx(
+                        "w-full bg-white/80 border rounded-xl p-4 text-sm font-medium h-24 transition-all",
+                        activeNoteType === 'note' ? "border-amber-200 text-amber-900 focus:border-amber-400" :
+                        activeNoteType === 'event' ? "border-blue-200 text-blue-900 focus:border-blue-400" :
+                        "border-purple-200 text-purple-900 focus:border-purple-400"
+                      )}
+                    />
+                  </div>
                   <div className="flex justify-end gap-3 mt-3">
                     <button
                       onClick={() => {
                         setIsAddingNote(false);
                         setNewNoteContent('');
                         setMentionedUserIds([]);
+                        setActiveNoteType('note');
                       }}
                       className="px-4 py-2 text-slate-500 text-xs font-bold uppercase hover:text-slate-700 transition-all"
                     >
                       Cancel
                     </button>
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         if (newNoteContent.trim() && currentUser) {
                           const noteId = `note-${Date.now()}`;
-                          const content = newNoteContent.trim();
+                          let content = newNoteContent.trim();
+                          
+                          // Auto-tag current bid
+                          if (!content.includes(`#${bid.projectName}`)) {
+                            content = `${content} #${bid.projectName}`;
+                          }
+
                           const newNote = {
                             id: noteId,
                             content,
-                            color: '#FEF3C7',
+                            type: activeNoteType,
+                            date: activeNoteType !== 'note' ? selectedDate : undefined,
+                            color: activeNoteType === 'note' ? '#FEF3C7' : activeNoteType === 'event' ? '#EFF6FF' : '#F3E8FF',
                             createdAt: new Date().toISOString(),
                             createdBy: currentUser.name,
-                            mentionedUserIds: mentionedUserIds
+                            mentionedUserIds: mentionedUserIds,
+                            taggedBidIds: taggedBidIds.includes(bid.id) ? taggedBidIds : [...taggedBidIds, bid.id]
                           };
+                          
                           const updatedNotes = [...(bid.notes || []), newNote];
                           onUpdate({ ...bid, notes: updatedNotes });
+
+                          // Sync to Calendar if it's an event or reminder
+                          if (activeNoteType !== 'note' && onAddCalendarEvent) {
+                            await onAddCalendarEvent({
+                              id: `cal-${noteId}`,
+                              title: `${activeNoteType === 'event' ? 'Event' : 'Reminder'}: ${bid.projectName}`,
+                              date: selectedDate,
+                              type: activeNoteType,
+                              color: activeNoteType === 'event' ? '#3B82F6' : '#8B5CF6',
+                              description: content,
+                              createdBy: currentUser.name,
+                              taggedBidIds: [bid.id],
+                              mentionedUserIds: mentionedUserIds
+                            });
+                          }
 
                           // Trigger notifications for mentioned users
                           if (triggerMention && mentionedUserIds.length > 0) {
@@ -1540,12 +1757,19 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
 
                           setNewNoteContent('');
                           setMentionedUserIds([]);
+                          setTaggedBidIds([]);
                           setIsAddingNote(false);
+                          setActiveNoteType('note');
                         }
                       }}
-                      className="px-5 py-2 bg-amber-500 text-white rounded-xl text-xs font-black uppercase hover:bg-amber-600 transition-all"
+                      className={clsx(
+                        "px-5 py-2 text-white rounded-xl text-xs font-black uppercase transition-all shadow-sm active:scale-95",
+                        activeNoteType === 'note' ? "bg-amber-500 hover:bg-amber-600" :
+                        activeNoteType === 'event' ? "bg-blue-500 hover:bg-blue-600" :
+                        "bg-purple-500 hover:bg-purple-600"
+                      )}
                     >
-                      Save Note
+                      Save {activeNoteType}
                     </button>
                   </div>
                 </div>
@@ -1558,14 +1782,49 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
                   {bid.notes.map((note) => (
                     <div
                       key={note.id}
-                      className="p-5 rounded-2xl border shadow-sm transition-all hover:shadow-md group relative"
-                      style={{ backgroundColor: note.color || '#FEF3C7', borderColor: 'rgba(0,0,0,0.1)' }}
+                      className="p-5 rounded-2xl border shadow-sm transition-all hover:shadow-md group relative flex flex-col"
+                      style={{ 
+                        backgroundColor: note.color || (note.type === 'event' ? '#EFF6FF' : note.type === 'reminder' ? '#F3E8FF' : '#FEF3C7'), 
+                        borderColor: 'rgba(0,0,0,0.05)' 
+                      }}
                     >
-                      <p className="text-sm text-amber-900 font-medium leading-relaxed whitespace-pre-wrap">{note.content}</p>
-                      <div className="mt-4 pt-3 border-t border-amber-900/10 flex items-center justify-between">
-                        <span className="text-[9px] text-amber-800/60 font-bold">{note.createdBy}</span>
-                        <span className="text-[9px] text-amber-800/40 font-medium">
-                          {new Date(note.createdAt).toLocaleDateString()}
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className={clsx(
+                          "w-6 h-6 rounded-lg flex items-center justify-center bg-white/50 backdrop-blur-sm shadow-sm",
+                          note.type === 'event' ? "text-blue-600" : note.type === 'reminder' ? "text-purple-600" : "text-amber-600"
+                        )}>
+                          {note.type === 'event' ? <Activity size={12} /> : note.type === 'reminder' ? <Clock size={12} /> : <StickyNote size={12} />}
+                        </div>
+                        <span className={clsx(
+                          "text-[9px] font-black uppercase tracking-tighter",
+                          note.type === 'event' ? "text-blue-700" : note.type === 'reminder' ? "text-purple-700" : "text-amber-700"
+                        )}>
+                          {note.type || 'Note'} {note.date && `• ${formatSafeDate(note.date)}`}
+                        </span>
+                      </div>
+                      <div className={clsx(
+                        "text-sm font-medium leading-relaxed flex-1",
+                        note.type === 'event' ? "text-blue-900" : note.type === 'reminder' ? "text-purple-900" : "text-amber-900"
+                      )}>
+                        <RichText
+                          text={note.content}
+                          bids={bids}
+                          onTagClick={onViewBid}
+                        />
+                      </div>
+                      <div className={clsx(
+                        "mt-4 pt-3 border-t flex items-center justify-between",
+                        note.type === 'event' ? "border-blue-900/5" : note.type === 'reminder' ? "border-purple-900/5" : "border-amber-900/5"
+                      )}>
+                        <span className={clsx(
+                          "text-[9px] font-bold",
+                          note.type === 'event' ? "text-blue-800/60" : note.type === 'reminder' ? "text-purple-800/60" : "text-amber-800/60"
+                        )}>{note.createdBy}</span>
+                        <span className={clsx(
+                          "text-[9px] font-medium",
+                          note.type === 'event' ? "text-blue-800/40" : note.type === 'reminder' ? "text-purple-800/40" : "text-amber-800/40"
+                        )}>
+                          {formatSafeDate(note.createdAt)}
                         </span>
                       </div>
                       {userRole !== 'VIEWER' && (
@@ -1608,8 +1867,10 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
         isOpen={showNoBidModal}
         onClose={() => setShowNoBidModal(false)}
         onConfirm={handleSetNoBid}
-        category={noBidCategory}
-        setCategory={setNoBidCategory}
+        onAddCustomReason={handleAddCustomReason}
+        globalReasons={globalReasons}
+        initialReasons={bid.noBidReasons}
+        initialComments={bid.noBidComments}
       />
 
       <OutcomeModal
@@ -1751,13 +2012,54 @@ const SummaryItem: React.FC<{ label: string; value: string; color?: string }> = 
   </div>
 );
 
-const UploadPortal: React.FC<{ onClick: () => void; title: string; desc: string; loading?: boolean; status?: string | null; icon: React.ReactNode }> = ({ onClick, title, desc, loading, status, icon }) => (
-  <div onClick={onClick} className="group bg-white rounded-[2.5rem] border-2 border-dashed border-slate-200 p-10 text-center hover:border-[#D32F2F] hover:bg-red-50/20 shadow-sm transition-all cursor-pointer active:scale-95">
-    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 group-hover:bg-white transition-all shadow-inner">{loading ? <Loader2 className="animate-spin text-[#D32F2F]" size={32} /> : icon}</div>
-    <h4 className="text-lg font-black text-slate-900 uppercase mb-2 tracking-tight group-hover:text-red-700">{loading && status ? status : title}</h4>
-    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest leading-relaxed">{desc}</p>
-  </div>
-);
+const UploadPortal: React.FC<{ 
+  onClick: () => void; 
+  onFileDrop?: (file: File) => void;
+  title: string; 
+  desc: string; 
+  loading?: boolean; 
+  status?: string | null; 
+  icon: React.ReactNode 
+}> = ({ onClick, onFileDrop, title, desc, loading, status, icon }) => {
+  const [isOver, setIsOver] = useState(false);
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragover') setIsOver(true);
+    else setIsOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && onFileDrop) onFileDrop(file);
+  };
+
+  return (
+    <div 
+      onClick={onClick} 
+      onDragOver={handleDrag}
+      onDragLeave={handleDrag}
+      onDrop={handleDrop}
+      className={clsx(
+        "group bg-white rounded-[2.5rem] border-2 border-dashed p-10 text-center shadow-sm transition-all cursor-pointer active:scale-95",
+        isOver ? "border-[#D32F2F] bg-red-50/20 scale-[1.02]" : "border-slate-200 hover:border-[#D32F2F] hover:bg-red-50/20"
+      )}
+    >
+      <div className={clsx(
+        "w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:bg-white transition-all shadow-inner",
+        isOver && "bg-white scale-110"
+      )}>
+        {loading ? <Loader2 className="animate-spin text-[#D32F2F]" size={32} /> : icon}
+      </div>
+      <h4 className="text-lg font-black text-slate-900 uppercase mb-2 tracking-tight group-hover:text-red-700">{loading && status ? status : title}</h4>
+      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest leading-relaxed">{desc}</p>
+    </div>
+  );
+};
 
 
 

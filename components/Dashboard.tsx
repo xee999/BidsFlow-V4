@@ -5,7 +5,7 @@ import {
   TrendingUp, Clock, AlertCircle, ArrowUpRight, Plus,
   Calendar, Activity, CheckCircle2, Briefcase,
   Target, Ban, DollarSign, Zap, Sparkles, ShieldAlert,
-  FileWarning
+  FileWarning, Send
 } from 'lucide-react';
 import { BidRecord, BidStatus, BidStage, RiskLevel, User, ActivityLog } from '../types.ts';
 import { clsx } from 'clsx';
@@ -31,7 +31,7 @@ const STAGE_COLORS: Record<string, { bg: string, text: string, border: string }>
 
 
 const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid, onViewBid, onNavigateToFilter }) => {
-  const [sortBy, setSortBy] = React.useState<'priority' | 'due' | 'intake'>('due');
+  const [sortBy, setSortBy] = React.useState<'priority' | 'due' | 'intake' | 'published'>('due');
 
   const currentMonthName = useMemo(() => {
     return new Date().toLocaleString('default', { month: 'long' }).toUpperCase();
@@ -127,6 +127,9 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
     } else if (sortBy === 'intake') {
       // Last received (Chronological descending - newest first)
       mapped.sort((a, b) => new Date(b.receivedDate).getTime() - new Date(a.receivedDate).getTime());
+    } else if (sortBy === 'published') {
+      // Last published (Chronological descending - newest first)
+      mapped.sort((a, b) => new Date(b.publishDate || '0000-00-00').getTime() - new Date(a.publishDate || '0000-00-00').getTime());
     }
 
     return mapped;
@@ -245,6 +248,15 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
                   >
                     <Calendar size={12} /> Intake
                   </button>
+                  <button
+                    onClick={() => setSortBy('published')}
+                    className={clsx(
+                      "px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                      sortBy === 'published' ? "bg-[#0F172A] text-white shadow-lg shadow-slate-200" : "text-slate-400 hover:text-slate-600 hover:bg-white"
+                    )}
+                  >
+                    <Send size={12} /> Published
+                  </button>
                 </div>
 
                 <div className="h-8 w-px bg-slate-100"></div>
@@ -266,7 +278,9 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
                     <div className="flex justify-between items-start">
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-3">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{bid.id}</span>
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[9px] font-bold uppercase tracking-widest">
+                            {bid.id}
+                          </span>
                           <span className={clsx(
                             "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border",
                             stageColor.bg, stageColor.text, stageColor.border
@@ -289,13 +303,16 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
                         <span className="text-[10px] font-bold text-slate-400 uppercase">{sanitizeDateValue(bid.deadline) || bid.deadline}</span>
                       </div>
                     </div>
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        <span>Bid Progression</span>
+                    <div className="space-y-3 group cursor-help" title={`CURRENT STAGE: ${bid.currentStage.toUpperCase()}`}>
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest h-4">
+                        <div className="flex-1">
+                          <span className="text-slate-400 group-hover:hidden transition-all">Bid Progression</span>
+                          <span className="text-[#D32F2F] hidden group-hover:block animate-in fade-in slide-in-from-bottom-1">STAGE: {bid.currentStage.toUpperCase()}</span>
+                        </div>
                         <span className="text-slate-900">{bid.integrity}%</span>
                       </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full transition-all duration-1000" style={{ width: `${bid.integrity}%`, backgroundColor: getIntegrityColor(bid.integrity) }}></div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-50 shadow-inner">
+                        <div className="h-full transition-all duration-1000 group-hover:bg-[#D32F2F]" style={{ width: `${bid.integrity}%`, backgroundColor: getIntegrityColor(bid.integrity) }}></div>
                       </div>
                     </div>
                   </div>
@@ -310,7 +327,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bids, user, auditTrail, onNewBid,
             <div className="space-y-4">
               {deadlines.length > 0 ? deadlines.map(bid => (
                 <div key={bid.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between group cursor-pointer hover:bg-white hover:shadow-lg transition-all">
-                  <div className="min-w-0"><p className="text-xs font-black text-slate-900 truncate group-hover:text-[#D32F2F]">{bid.projectName}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">{sanitizeDateValue(bid.deadline) || bid.deadline}</p></div>
+                  <div className="min-w-0"><p className="text-xs font-black text-slate-900 truncate group-hover:text-[#D32F2F]">{bid.id} - {bid.projectName}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">{sanitizeDateValue(bid.deadline) || bid.deadline}</p></div>
                   <div className={clsx("text-white text-[9px] font-black px-2 py-1 rounded-lg", getDaysLeft(bid.deadline) <= 3 ? "bg-red-500" : "bg-slate-400")}>{getDaysLeft(bid.deadline) <= 3 ? "DUE" : "SOON"}</div>
                 </div>
               )) : <p className="text-[10px] text-slate-400 font-bold uppercase text-center py-4 italic">No upcoming deadlines</p>}

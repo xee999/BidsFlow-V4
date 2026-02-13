@@ -6,6 +6,9 @@ const calendarEventSchema = new mongoose.Schema({
     date: { type: String, required: true }, // ISO date string YYYY-MM-DD
     type: { type: String, enum: ['event', 'reminder', 'note'], default: 'event' },
     color: { type: String, required: true },
+    description: { type: String },
+    mentionedUserIds: [String],
+    taggedBidIds: [String],
     createdBy: { type: String },
     createdAt: { type: Date, default: Date.now }
 });

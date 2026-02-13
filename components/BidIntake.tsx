@@ -54,7 +54,8 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, i
     },
     deliverablesSummary: [],
     financialFormats: [],
-    technicalDocuments: []
+    technicalDocuments: [],
+    jvAllowed: false
   });
 
   // Toast handling
@@ -150,11 +151,14 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, i
             aiQualificationSummary: result.aiQualificationSummary || prev.aiQualificationSummary || '',
             scopeOfWork: result.scopeOfWork || prev.scopeOfWork || '',
             requiredSolutions: Array.from(new Set([...matchedSolutions])),
-            complianceChecklist: extractedCompliance,
-            technicalQualificationChecklist: extractedQualChecklist,
+            // Merge or append AI-extracted items to existing checklists if editing
+            complianceChecklist: initialBid ? [...(prev.complianceChecklist || []), ...extractedCompliance] : extractedCompliance,
+            technicalQualificationChecklist: initialBid ? [...(prev.technicalQualificationChecklist || []), ...extractedQualChecklist] : extractedQualChecklist,
             contractDuration: convertToYears(result.contractDuration || prev.contractDuration || ''),
             customerPaymentTerms: result.customerPaymentTerms || prev.customerPaymentTerms || '',
-            financialFormats: result.financialFormats || prev.financialFormats || [],
+            financialFormats: result.financialFormats && result.financialFormats.length > 0 
+              ? [...(prev.financialFormats || []), ...result.financialFormats] 
+              : prev.financialFormats,
             publishDate: sanitizeDateValue(result.publishDate) || prev.publishDate,
             complexity: (result.complexity as any) || prev.complexity,
             preBidMeeting: result.preBidMeeting ? {
@@ -162,8 +166,11 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, i
               date: sanitizeDateValue(result.preBidMeeting.date),
               time: sanitizeTimeValue(result.preBidMeeting.time)
             } : prev.preBidMeeting,
-            deliverablesSummary: result.deliverablesSummary || prev.deliverablesSummary || [],
-            technicalDocuments: [tenderDoc]
+            deliverablesSummary: result.deliverablesSummary && result.deliverablesSummary.length > 0
+              ? [...(prev.deliverablesSummary || []), ...result.deliverablesSummary]
+              : prev.deliverablesSummary,
+            technicalDocuments: [...(prev.technicalDocuments || []), tenderDoc],
+            jvAllowed: result.jvAllowed ?? prev.jvAllowed
           }));
 
           // Clear error states for newly extracted data
@@ -245,6 +252,10 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, i
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
+      addToast({
+        type: 'error',
+        message: 'Please fill in all mandatory fields marked with *'
+      });
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -279,7 +290,6 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, i
       onUpdate?.({
         ...initialBid,
         ...formData,
-        id: initialBid.id // Ensure ID never changes
       } as BidRecord);
     } else {
       const newBid: BidRecord = {
@@ -315,6 +325,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, i
         complexity: formData.complexity || 'Medium',
         preBidMeeting: formData.preBidMeeting,
         deliverablesSummary: formData.deliverablesSummary,
+        jvAllowed: formData.jvAllowed ?? false,
         managementApprovalStatus: 'Pending',
         pricingApprovalStatus: 'Pending'
       };
@@ -391,7 +402,7 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, i
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <InputField label="JBC Manager*" value={formData.jbcName} error={errors.jbcName} onChange={v => { setFormData({ ...formData, jbcName: v }); if (v) setErrors(p => ({ ...p, jbcName: false })); }} placeholder="Full Name" />
+            <InputField label="JBC*" value={formData.jbcName} error={errors.jbcName} onChange={v => { setFormData({ ...formData, jbcName: v }); if (v) setErrors(p => ({ ...p, jbcName: false })); }} placeholder="Full Name" />
 
             <div>
               <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 ml-1">Channel*</label>
@@ -448,6 +459,20 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, i
               placeholder="e.g. 2.5"
             />
             <InputField label="Payment Terms (Net Days)*" value={formData.customerPaymentTerms} onChange={v => setFormData({ ...formData, customerPaymentTerms: v })} placeholder="e.g. 45" />
+            <div>
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 ml-1">JV Allowed</label>
+              <div className="relative">
+                <select 
+                  value={formData.jvAllowed ? 'Yes' : 'No'} 
+                  onChange={e => setFormData({ ...formData, jvAllowed: e.target.value === 'Yes' })} 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-[#D32F2F] appearance-none outline-none"
+                >
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -520,8 +545,13 @@ const BidIntake: React.FC<BidIntakeProps> = ({ onCancel, onInitiate, onUpdate, i
 
           <div className="space-y-6">
             <div>
-              <label className={clsx("block text-[10px] font-black uppercase tracking-widest mb-2 ml-1", errors.summaryRequirements ? "text-red-500" : "text-slate-500")}>Project Brief*</label>
-              <textarea value={formData.summaryRequirements || ''} onChange={e => { setFormData({ ...formData, summaryRequirements: e.target.value }); if (e.target.value) setErrors(p => ({ ...p, summaryRequirements: false })); }} rows={3} className={clsx("w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[#D32F2F] outline-none transition-all", errors.summaryRequirements ? "border-red-300 bg-red-50" : "border-slate-200")} placeholder="High-level summary..." />
+              <div className="flex justify-between items-center mb-2 ml-1">
+                <label className={clsx("text-[10px] font-black uppercase tracking-widest", errors.summaryRequirements ? "text-red-500" : "text-slate-500")}>Project Brief*</label>
+                <span className={clsx("text-[8px] font-black uppercase tracking-widest", (formData.summaryRequirements?.split(/\s+/).filter(Boolean).length || 0) > 70 ? "text-red-500" : "text-slate-400")}>
+                  {formData.summaryRequirements?.split(/\s+/).filter(Boolean).length || 0} / 70 Words
+                </span>
+              </div>
+              <textarea value={formData.summaryRequirements || ''} onChange={e => { setFormData({ ...formData, summaryRequirements: e.target.value }); if (e.target.value) setErrors(p => ({ ...p, summaryRequirements: false })); }} rows={3} className={clsx("w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[#D32F2F] outline-none transition-all", errors.summaryRequirements ? "border-red-300 bg-red-50" : "border-slate-200")} placeholder="High-level summary (50-70 words)..." />
             </div>
             <div>
               <label className={clsx("block text-[10px] font-black uppercase tracking-widest mb-2 ml-1", errors.scopeOfWork ? "text-red-500" : "text-slate-500")}>Detailed SOW*</label>

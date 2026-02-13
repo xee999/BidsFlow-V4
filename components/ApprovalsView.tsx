@@ -28,6 +28,7 @@ interface ApprovalsViewProps {
 
 const ApprovalsView: React.FC<ApprovalsViewProps> = ({ bids, onViewBid }) => {
   const [filterStatus, setFilterStatus] = useState<BidStatus | 'All'>('All');
+  const [sortBy, setSortBy] = useState<'due' | 'value' | 'pending'>('due');
 
   // Helper to get remaining days
   const getRemainingDays = (deadlineStr: string) => {
@@ -59,9 +60,21 @@ const ApprovalsView: React.FC<ApprovalsViewProps> = ({ bids, onViewBid }) => {
   }, [bids]);
 
   const filteredBids = useMemo(() => {
-    if (filterStatus === 'All') return bids;
-    return bids.filter(b => b.status === filterStatus);
-  }, [bids, filterStatus]);
+    let result = filterStatus === 'All' ? [...bids] : bids.filter(b => b.status === filterStatus);
+    
+    return result.sort((a, b) => {
+      if (sortBy === 'due') {
+        return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+      } else if (sortBy === 'value') {
+        return (b.tcvExclTax || b.estimatedValue || 0) - (a.tcvExclTax || a.estimatedValue || 0);
+      } else if (sortBy === 'pending') {
+        const pendingA = getDaysPending(a.approvalRequestedDate, a.managementApprovalDate);
+        const pendingB = getDaysPending(b.approvalRequestedDate, b.managementApprovalDate);
+        return pendingB - pendingA;
+      }
+      return 0;
+    });
+  }, [bids, filterStatus, sortBy]);
 
   const statusFilters = [
     { id: 'All', label: 'All Bids', count: bids.length },
@@ -104,9 +117,14 @@ const ApprovalsView: React.FC<ApprovalsViewProps> = ({ bids, onViewBid }) => {
                     <AlertTriangle size={80} className="text-red-500" />
                   </div>
                   <div className="flex items-center justify-between mb-4 relative z-10">
-                    <span className="bg-red-500 text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full animate-pulse">
-                      Critical Action
-                    </span>
+                    <div className="flex gap-2">
+                        <span className="bg-red-500 text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full animate-pulse">
+                        Critical Action
+                        </span>
+                        <span className="bg-slate-100 text-slate-500 text-[9px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
+                        {bid.id}
+                        </span>
+                    </div>
                     <span className="text-[10px] font-bold text-red-500">{daysLeft} Days Left</span>
                   </div>
                   <h3 className="font-black text-slate-900 mb-1 group-hover:text-red-600 transition-colors line-clamp-1">{bid.projectName}</h3>
@@ -157,11 +175,31 @@ const ApprovalsView: React.FC<ApprovalsViewProps> = ({ bids, onViewBid }) => {
       {/* Main Table Section */}
       <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
         {/* Table Header & Filters */}
-        <div className="p-8 border-b border-slate-100 flex flex-col lg:flex-row justify-between items-center gap-6">
-          <h2 className="text-xl font-black text-slate-900 flex items-center gap-3 uppercase tracking-tight">
-            <ShieldCheck className="text-blue-500" size={24} />
-            Submission Clearances Pipeline
-          </h2>
+        <div className="p-8 border-b border-slate-100 flex flex-col xl:flex-row justify-between items-center gap-6">
+          <div className="flex flex-col md:flex-row items-center gap-6">
+            <h2 className="text-xl font-black text-slate-900 flex items-center gap-3 uppercase tracking-tight">
+              <ShieldCheck className="text-blue-500" size={24} />
+              Submission Clearances Pipeline
+            </h2>
+            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100">
+              {[
+                { id: 'due', label: 'Due Date', icon: <Clock size={12} /> },
+                { id: 'value', label: 'Value', icon: <DollarSign size={12} /> },
+                { id: 'pending', label: 'Pending', icon: <Timer size={12} /> }
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => setSortBy(opt.id as any)}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                    sortBy === opt.id ? "bg-[#0F172A] text-white shadow-md" : "text-slate-400 hover:text-slate-600"
+                  )}
+                >
+                  {opt.icon} {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex flex-wrap gap-1.5 p-1.5 bg-slate-50 border border-slate-200 rounded-[1.5rem]">
             {statusFilters.map((filter) => (
               <button

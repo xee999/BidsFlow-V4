@@ -15,7 +15,7 @@ if (!GEMINI_API_KEY) {
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 const PRIMARY_MODEL = 'gemini-2.5-pro';
-const FALLBACK_MODEL = 'gemini-2.5-flash';
+const FALLBACK_MODEL = 'gemini-2.5-pro';
 
 const callAIWithRetry = async (fn, maxRetries = 5, initialDelay = 1500) => {
     let lastError;
@@ -52,7 +52,7 @@ export const analyzeBidDocumentServer = async (fileName, fileContentBase64) => {
             customerName: { type: SchemaType.STRING },
             projectName: { type: SchemaType.STRING },
             deadline: { type: SchemaType.STRING },
-            estimatedValue: { type: SchemaType.NUMBER },
+            estimatedValue: { type: SchemaType.STRING }, // Changed from NUMBER to STRING
             currency: { type: SchemaType.STRING },
             contractDuration: { type: SchemaType.STRING },
             customerPaymentTerms: { type: SchemaType.STRING },
@@ -61,6 +61,7 @@ export const analyzeBidDocumentServer = async (fileName, fileContentBase64) => {
             aiQualificationSummary: { type: SchemaType.STRING },
             publishDate: { type: SchemaType.STRING },
             complexity: { type: SchemaType.STRING },
+            jvAllowed: { type: SchemaType.BOOLEAN },
             preBidMeeting: {
                 type: SchemaType.OBJECT,
                 properties: {
@@ -119,13 +120,13 @@ export const analyzeBidDocumentServer = async (fileName, fileContentBase64) => {
                         item: { type: SchemaType.STRING },
                         description: { type: SchemaType.STRING },
                         uom: { type: SchemaType.STRING },
-                        quantity: { type: SchemaType.NUMBER }
+                        quantity: { type: SchemaType.STRING } // Changed from NUMBER to STRING
                     },
                     required: ["item", "uom", "quantity"]
                 }
             }
         },
-        required: ["customerName", "projectName", "deadline", "estimatedValue", "currency", "contractDuration", "customerPaymentTerms", "bidSecurity", "requiredSolutions", "aiQualificationSummary", "scopeOfWork", "summaryRequirements", "technicalQualificationChecklist", "complianceList", "financialFormats"]
+        required: ["customerName", "projectName", "deadline", "estimatedValue", "currency", "contractDuration", "customerPaymentTerms", "bidSecurity", "requiredSolutions", "aiQualificationSummary", "scopeOfWork", "summaryRequirements", "technicalQualificationChecklist", "complianceList", "financialFormats", "jvAllowed"]
     };
 
     const promptText = `MANDATORY COMPLIANCE & QUALIFICATION EXTRACTION PROTOCOL:
@@ -161,8 +162,10 @@ MANDATORY DATA FIELDS:
   3. System Integration (SI): Use for Business Applications (RPA/Agentic, ESM, App Managed Services, Big Data, ERP/CRM), Communication Solutions (Contact Center), Network Solutions (SDWAN, Firewall Mgmt), Infrastructure Solutions (Private Cloud, HCI).
   4. Other: Map others based on name (e.g., IoT to IoT).
 - Publish Date: Tender release date.
+- JV Allowed: MANDATORY. Determine if Joint Venture or Consortium is allowed by the customer based on eligibility clauses. Return true if allowed, false otherwise.
 - Complexity: Assessment based on (>50M PKR = High, 25-50M = Medium, <25M = Low), also consider: multi-vendor coordination, physical surveys needed, complex document sourcing, higher approval authority.
-- Scope of Work & Project Brief: Provide comprehensive summaries.`;
+- Scope of Work: Provide a comprehensive summary of the project scope.
+- Strategic Brief (summaryRequirements): Provide a concise strategic summary of the project. MANDATORY: The summary MUST be between 50 to 70 words. Do not exceed 70 words.`;
 
     const prompt = [{
         role: 'user',
@@ -172,36 +175,50 @@ MANDATORY DATA FIELDS:
         ]
     }];
 
-    try {
-        const model = genAI.getGenerativeModel({
-            model: PRIMARY_MODEL,
+    // Helper to run generation. returns { result, isFallback: boolean }
+    const runGeneration = async (modelName, useSchema = true) => {
+         const model = genAI.getGenerativeModel({
+            model: modelName,
             generationConfig: {
                 responseMimeType: "application/json",
                 maxOutputTokens: 32768,
-                responseSchema: schema
+                ...(useSchema ? { responseSchema: schema } : {})
             }
         });
+        return await callAIWithRetry(() => model.generateContent({ contents: prompt }), 3, 2000);
+    };
 
-        const result = await callAIWithRetry(() => model.generateContent({ contents: prompt }), 3, 2000);
-        const responseText = result.response.text();
-        return JSON.parse(responseText);
+    try {
+        console.log(`[AI] Starting primary analysis with ${PRIMARY_MODEL} for ${fileName}...`);
+        const result = await runGeneration(PRIMARY_MODEL, true);
+        console.log(`[AI] Primary analysis complete for ${fileName}.`);
+        return JSON.parse(result.response.text());
     } catch (error) {
-        console.error("Server-side AI analysis failed, trying fallback:", error.message);
+        console.error("Server-side AI analysis failed (" + error.message + "), trying fallback strategy...");
+        
         try {
-            const fallbackModel = genAI.getGenerativeModel({
-                model: FALLBACK_MODEL,
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    maxOutputTokens: 32768,
-                    responseSchema: schema
-                }
-            });
-            const result = await callAIWithRetry(() => fallbackModel.generateContent({ contents: prompt }), 3, 1000);
-            const responseText = result.response.text();
-            return JSON.parse(responseText);
+            console.log("Attempting fallback with " + FALLBACK_MODEL + "...");
+            // Use Schema again in fallback first? Or relax it immediately?
+            // If the error was "string did not match pattern", the schema is the problem.
+            // But if it was a timeout, schema might be fine.
+            // Let's assume pattern error means we should drop schema.
+            // But we can't easily detect error type from message reliably across versions.
+            // Safe bet: Try with schema first on fallback model (if it was just a glitch).
+            // Actually, since PRIMARY and FALLBACK are same model, just retrying with same schema is redundant if it's a deterministic validation error.
+            // So, let's try WITHOUT schema in fallback.
+            
+            console.log("Fallback: Retrying WITHOUT strict schema enforcement...");
+            const result = await runGeneration(FALLBACK_MODEL, false);
+            
+             // Clean output
+             let text = result.response.text();
+             text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+             return JSON.parse(text);
+
         } catch (fallbackError) {
-            console.error("Fallback AI failed too:", fallbackError.message);
-            throw new Error(`AI Analysis failed: ${fallbackError.message}`);
+             console.error("Fallback AI failed too:", fallbackError.message);
+             // Final desperate attempt if needed? No, 2 attempts is enough.
+             throw new Error(`AI Analysis failed: ${fallbackError.message}`);
         }
     }
 };

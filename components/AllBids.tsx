@@ -31,6 +31,10 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
             const matchesSearch = !searchQuery ||
                 bid.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 bid.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                bid.jbcName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (bid.region && bid.region.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                (bid.channel && bid.channel.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                (bid.complexity && bid.complexity.toLowerCase().includes(searchQuery.toLowerCase())) ||
                 bid.id.toLowerCase().includes(searchQuery.toLowerCase());
 
             // Status Filter - Complex logic for Active vs Not Submitted
@@ -108,6 +112,29 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
             }
 
             return matchesSearch && matchesStatus && matchesPhase && matchesSolution && matchesHorizon && matchesTimeline;
+        }).sort((a, b) => {
+            const getVal = (bid: BidRecord) => {
+                if (dateType === 'deadline') return bid.deadline;
+                if (dateType === 'published') return bid.publishDate || '0000-00-00';
+                return bid.receivedDate;
+            };
+
+            const valA = getVal(a);
+            const valB = getVal(b);
+
+            if (!valA) return 1;
+            if (!valB) return -1;
+
+            const timeA = new Date(valA).getTime();
+            const timeB = new Date(valB).getTime();
+
+            if (dateType === 'deadline') {
+                // Due date: Soonest first (ascending)
+                return timeA - timeB;
+            } else {
+                // Intake or Published: Newest first (descending)
+                return timeB - timeA;
+            }
         });
     }, [bids, searchQuery, statusFilter, phaseFilter, solutionFilter, quickHorizon, startDate, endDate, dateType]);
 
@@ -311,16 +338,26 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                         )} />
 
                         <div className="flex justify-between items-start mb-8 mt-2">
-                            <span className={clsx(
-                                "px-5 h-8 flex items-center rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm border",
-                                bid.status === BidStatus.WON ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
-                                    bid.status === BidStatus.LOST ? "bg-slate-50 text-slate-500 border-slate-100" :
-                                        bid.status === BidStatus.ACTIVE ? "bg-blue-50 text-blue-600 border-blue-100" :
-                                            bid.status === BidStatus.SUBMITTED ? "bg-orange-50 text-orange-600 border-orange-100" :
-                                                "bg-slate-50 text-slate-400 border-slate-100"
-                            )}>
-                                {bid.status}
-                            </span>
+                            <div className="flex items-center gap-3">
+                                <span className={clsx(
+                                    "px-5 h-8 flex items-center rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm border",
+                                    bid.status === BidStatus.WON ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                                        bid.status === BidStatus.LOST ? "bg-slate-50 text-slate-500 border-slate-100" :
+                                            bid.status === BidStatus.ACTIVE ? "bg-blue-50 text-blue-600 border-blue-100" :
+                                                bid.status === BidStatus.SUBMITTED ? "bg-orange-50 text-orange-600 border-orange-100" :
+                                                    "bg-slate-50 text-slate-400 border-slate-100"
+                                )}>
+                                    {bid.status}
+                                </span>
+                                <span className="px-3 h-8 flex items-center rounded-full text-[10px] font-bold uppercase tracking-[0.15em] bg-slate-100 text-slate-500">
+                                    {bid.id}
+                                </span>
+                                {bid.jvAllowed && (
+                                    <span className="px-3 h-8 flex items-center rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-sm">
+                                        JV
+                                    </span>
+                                )}
+                            </div>
                             <div className="text-3xl font-black text-slate-900 tracking-tighter italic opacity-80 group-hover:opacity-100 transition-opacity">
                                 <span className="text-[12px] align-top mt-1 mr-1">{bid.currency}</span>
                                 {((bid.tcvExclTax || bid.estimatedValue) / 1000000).toFixed(1)}M
@@ -354,15 +391,18 @@ const AllBids: React.FC<AllBidsProps> = ({ bids, onViewBid, initialStatus = 'All
                             const integrity = calculateIntegrity(bid);
 
                             return (
-                                <div className="mt-auto mb-6 space-y-3">
-                                    <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                        <span>Bid Progression</span>
-                                        <span className="text-slate-900">{integrity}%</span>
+                                    <div className="mt-auto mb-6 space-y-3 group cursor-help" title={`CURRENT STAGE: ${bid.currentStage.toUpperCase()}`}>
+                                        <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest h-4">
+                                            <div className="flex-1">
+                                                <span className="text-slate-400 group-hover:hidden transition-all">Bid Progression</span>
+                                                <span className="text-[#D32F2F] hidden group-hover:block animate-in fade-in slide-in-from-bottom-1">STAGE: {bid.currentStage.toUpperCase()}</span>
+                                            </div>
+                                            <span className="text-slate-900">{integrity}%</span>
+                                        </div>
+                                        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-50 shadow-inner">
+                                            <div className="h-full transition-all duration-1000 group-hover:bg-[#D32F2F]" style={{ width: `${integrity}%`, backgroundColor: getIntegrityColor(integrity) }}></div>
+                                        </div>
                                     </div>
-                                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                                        <div className="h-full transition-all duration-1000" style={{ width: `${integrity}%`, backgroundColor: getIntegrityColor(integrity) }}></div>
-                                    </div>
-                                </div>
                             );
 
                         })()}

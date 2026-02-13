@@ -1,0 +1,40 @@
+#!/usr/bin/expect -f
+set timeout 600
+set ip [lindex $argv 0]
+set port [lindex $argv 1]
+set password [lindex $argv 2]
+set prod_uri [lindex $argv 3]
+
+spawn ssh -o StrictHostKeyChecking=no -p $port root@$ip
+expect {
+  "password:" { send "$password\r" }
+  "refused" { puts "Connection refused"; exit 1 }
+}
+expect "#"
+
+# 1. Dump from Prod to this machine
+send "mongodump --uri=\"$prod_uri\" --gzip --archive=/root/dump_migration.gzip\r"
+expect "#"
+
+# 2. Restore from local file
+send "mongorestore --gzip --archive=/root/dump_migration.gzip\r"
+expect "#"
+
+# 3. Create User
+send "mongosh admin <<EOF
+use admin
+try {
+  db.createUser({
+    user: 'bidsflow_user',
+    pwd: 'Smart@4ever',
+    roles: [{ role: 'readWrite', db: 'bidsflow' }]
+  })
+} catch (e) {
+  print('User might already exist')
+}
+EOF
+\r"
+expect "#"
+
+send "exit\r"
+expect eof

@@ -17,13 +17,13 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isCollapsed, setIsCollapsed, onLogout, user }) => {
   return (
     <div className={clsx(
-      "h-screen bg-[#1E3A5F] text-white flex flex-col fixed left-0 top-0 z-[100] shadow-2xl transition-all duration-300 ease-in-out",
+      "h-screen bg-[#1E3A5F] text-white flex flex-col fixed left-0 top-0 z-30 shadow-2xl transition-all duration-300 ease-in-out",
       isCollapsed ? "w-20" : "w-64"
     )}>
       {/* Collapse Toggle Button */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute -right-4 top-12 w-8 h-8 bg-[#D32F2F] rounded-full flex items-center justify-center text-white shadow-2xl border-4 border-[#1E3A5F] hover:scale-110 active:scale-95 transition-all z-[110]"
+        className="absolute -right-4 top-12 w-8 h-8 bg-[#D32F2F] rounded-full flex items-center justify-center text-white shadow-2xl border-4 border-[#1E3A5F] hover:scale-110 active:scale-95 transition-all z-20"
         title={isCollapsed ? "Expand Navigation" : "Collapse Navigation"}
       >
         {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}

@@ -1,0 +1,46 @@
+#!/usr/bin/expect -f
+set ip [lindex $argv 0]
+set port [lindex $argv 1]
+set password [lindex $argv 2]
+set new_password [lindex $argv 3]
+
+set timeout 20
+spawn ssh -o StrictHostKeyChecking=no -p $port root@$ip
+expect {
+  "password:" { 
+      send "$password\r"
+      expect {
+          "Permission denied" { puts "Access denied"; exit 1 }
+          -re "#" { }
+          timeout { puts "Login prompt timeout"; exit 1 }
+      }
+  }
+  "refused" { puts "Connection refused"; exit 1 }
+  timeout { puts "SSH connect timeout"; exit 1 }
+}
+
+set timeout 900
+send "\r"
+expect -re "#"
+
+# Change Password
+send "echo \"root:$new_password\" | chpasswd\r"
+expect -re "#"
+
+# Ensure Node & NPM & Nginx
+send "apt-get update && apt-get install -y nodejs npm nginx unzip\r"
+expect -re "#"
+
+# Ensure PM2
+send "npm install -g pm2\r"
+expect -re "#"
+
+# Nginx Config
+send "printf 'server {\n    listen 80;\n    server_name _;\n    client_max_body_size 50M;\n\n    location / {\n        proxy_pass http://localhost:3000;\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade \$http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_set_header Host \$host;\n        proxy_cache_bypass \$http_upgrade;\n    }\n}\n' > /etc/nginx/sites-available/default && systemctl restart nginx\r"
+expect -re "#"
+
+send "mkdir -p /var/www/bidsflow\r"
+expect -re "#"
+
+send "exit\r"
+expect eof

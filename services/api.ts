@@ -31,8 +31,9 @@ export const bidApi = {
         if (!res.ok) throw new Error('Failed to check duplicates');
         return res.json();
     },
-    update: async (bid: BidRecord): Promise<BidRecord> => {
-        const res = await fetch(`${API_BASE}/bids/${bid.id}`, {
+    update: async (bid: BidRecord, oldId?: string): Promise<BidRecord> => {
+        const idToUse = oldId || bid.id;
+        const res = await fetch(`${API_BASE}/bids/${idToUse}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(bid),
@@ -115,6 +116,15 @@ export const calendarApi = {
             body: JSON.stringify(event),
         });
         if (!res.ok) throw new Error('Failed to create calendar event');
+        return res.json();
+    },
+    update: async (event: CalendarEvent): Promise<CalendarEvent> => {
+        const res = await fetch(`${API_BASE}/calendar-events/${event.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(event),
+        });
+        if (!res.ok) throw new Error('Failed to update calendar event');
         return res.json();
     },
     remove: async (id: string): Promise<void> => {

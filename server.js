@@ -1,6 +1,7 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import express from 'express';
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import cookieParser from 'cookie-parser';
@@ -12,6 +13,8 @@ import { Bid } from './models/Bid.js';
 import { VaultAsset } from './models/VaultAsset.js';
 import { AuditLog } from './models/AuditLog.js';
 import { User } from './models/User.js';
+import { CalendarEvent } from './models/CalendarEvent.js';
+import { NoBidReason } from './models/NoBidReason.js';
 import { analyzeBidDocumentServer } from './middleware/ai.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -19,14 +22,15 @@ import rolesRoutes from './routes/roles.js';
 import { Role, seedBuiltInRoles } from './models/Role.js';
 import crypto from 'crypto';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
+
+// Trust Proxy for Cloud Run / Load Balancer (required for rate limiting to see real IP)
+app.set('trust proxy', 1);
 
 // Security Middleware
 app.use(helmet({
@@ -41,6 +45,7 @@ app.use(helmet({
             objectSrc: ["'none'"],
             mediaSrc: ["'self'"],
             frameSrc: ["'none'"],
+            upgradeInsecureRequests: null,
         },
     },
 }));
@@ -85,6 +90,8 @@ const connectDB = async () => {
         await createDefaultAdmin();
         // Seed built-in roles
         await seedBuiltInRoles();
+        // Seed default no-bid reasons
+        await seedDefaultNoBidReasons();
     } catch (err) {
         console.error('MongoDB connection error:', err);
         // Retry logic handled by mongoose usually, but explicit retry for initial connection failure
@@ -143,6 +150,26 @@ async function createDefaultAdmin() {
     } catch (err) {
         console.error('Error creating default admin:', err);
     }
+}
+
+async function seedDefaultNoBidReasons() {
+  try {
+    const defaultReasons = [
+      { id: 'nbr-time-limitation', label: 'Time Limitation', isDefault: true },
+      { id: 'nbr-product-limitation', label: 'Product Limitation', isDefault: true },
+      { id: 'nbr-low-moq', label: 'Low MOQ', isDefault: true },
+      { id: 'nbr-no-response-team', label: 'No Response from Team', isDefault: true },
+      { id: 'nbr-no-preferred-price', label: 'No Preferred Price', isDefault: true },
+      { id: 'nbr-out-of-scope', label: 'Out of Scope', isDefault: true }
+    ];
+
+    for (const reason of defaultReasons) {
+      await NoBidReason.updateOne({ id: reason.id }, { $set: reason }, { upsert: true });
+    }
+    console.log('✓ Default No-Bid Reasons seeded');
+  } catch (err) {
+    console.error('Error seeding no-bid reasons:', err);
+  }
 }
 
 // Middleware to check DB connection
@@ -214,7 +241,7 @@ app.get('/api/bids', checkDbConnection, async (req, res) => {
         console.log('[/api/bids] Fetching bid metadata summaries...');
 
         const bids = await Bid.find()
-            .select('-technicalDocuments -vendorQuotations -financialFormats -proposalSections -technicalQualificationChecklist -complianceChecklist')
+            .select('-technicalDocuments -vendorQuotations -financialFormats -proposalSections -technicalQualificationChecklist -complianceChecklist -deliverablesSummary -notes -strategicRiskAssessment -finalRiskAssessment -solutioningAIAnalysis')
             .sort({ createdAt: -1 })
             .maxTimeMS(5000)
             .lean();
@@ -246,8 +273,8 @@ app.get('/api/bids/:id', checkDbConnection, async (req, res) => {
 
 // Validation Middleware
 const validateBid = [
-    body('customerName').trim().notEmpty().withMessage('Customer name is required').isLength({ max: 200 }).escape(),
-    body('projectName').trim().notEmpty().withMessage('Project name is required').isLength({ max: 300 }).escape(),
+    body('customerName').trim().notEmpty().withMessage('Customer name is required').isLength({ max: 200 }),
+    body('projectName').trim().notEmpty().withMessage('Project name is required').isLength({ max: 300 }),
     body('deadline').optional().isISO8601().toDate().withMessage('Invalid deadline date'),
     body('estimatedValue').optional().isNumeric().withMessage('Estimated value must be a number'),
     body('status').optional().isIn(['Active', 'Submitted', 'Won', 'Lost', 'No Bid']).withMessage('Invalid status'),
@@ -334,20 +361,92 @@ app.post('/api/bids/check-duplicate', checkDbConnection, async (req, res) => {
 
 app.put('/api/bids/:id', checkDbConnection, async (req, res) => {
     try {
-        const bid = await Bid.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+        const oldId = req.params.id.trim();
+        const newId = req.body.id;
+
+        // Check if ID is being changed and if new ID already exists
+        if (newId && newId !== oldId) {
+            const existingBid = await Bid.findOne({ id: newId });
+            if (existingBid) {
+                return res.status(409).json({ error: `Bid ID ${newId} already exists` });
+            }
+        }
+
+        const bid = await Bid.findOneAndUpdate({ id: oldId }, req.body, { new: true });
         if (!bid) return res.status(404).json({ error: 'Bid not found' });
+
+        const updatePromises = [];
+
+        // If ID was changed, update references in other collections
+        if (newId && newId !== oldId) {
+            console.log(`[ID CHANGE] Queueing reference updates from ${oldId} to ${newId}`);
+            updatePromises.push(
+                CalendarEvent.updateMany(
+                    { taggedBidIds: oldId },
+                    { $set: { "taggedBidIds.$[elem]": newId } },
+                    { arrayFilters: [{ "elem": oldId }] }
+                ).catch(err => console.warn('Calendar ID update failed:', err.message)),
+                AuditLog.updateMany({ bidId: oldId }, { $set: { bidId: newId } })
+                    .catch(err => console.warn('AuditLog ID update failed:', err.message))
+            );
+        }
+
+        // If deadline or projectName changed, update associated deadline calendar events
+        if (req.body.deadline || req.body.projectName) {
+            const updatedBidId = newId || oldId;
+            const calendarUpdateData = {};
+            if (req.body.deadline) calendarUpdateData.date = req.body.deadline.split('T')[0];
+            if (req.body.projectName) {
+                calendarUpdateData.title = `Deadline: ${req.body.projectName}`;
+                calendarUpdateData.description = `Submission deadline for ${req.body.projectName} for ${req.body.customerName || 'customer'}`;
+            }
+
+            if (Object.keys(calendarUpdateData).length > 0) {
+                updatePromises.push(
+                    CalendarEvent.updateMany(
+                        { 
+                            taggedBidIds: updatedBidId,
+                            id: { $regex: /^cal-deadline-/ }
+                        },
+                        { $set: calendarUpdateData }
+                    ).catch(err => console.warn('Calendar sync failed:', err.message))
+                );
+            }
+        }
+
+        // Execute all side-effect updates in background
+        if (updatePromises.length > 0) {
+            Promise.all(updatePromises).then(() => {
+                console.log(`[SYNC] Completed all secondary updates for bid ${newId || oldId}`);
+            });
+        }
+
         res.json(bid);
     } catch (err) {
         console.error('Error updating bid:', err);
+        if (err.code === 11000) {
+            return res.status(409).json({ error: 'Duplicate key error: Bid ID must be unique' });
+        }
         res.status(400).json({ error: err.message });
     }
 });
 
 app.delete('/api/bids/:id', checkDbConnection, async (req, res) => {
     try {
-        const bid = await Bid.findOneAndDelete({ id: req.params.id });
+        const bidId = req.params.id.trim();
+        const bid = await Bid.findOneAndDelete({ id: bidId });
         if (!bid) return res.status(404).json({ error: 'Bid not found' });
-        res.json({ message: 'Bid permanently deleted' });
+
+        // Cascading Deletion: Remove associated calendar events
+        try {
+            const deleteResult = await CalendarEvent.deleteMany({ taggedBidIds: bidId });
+            console.log(`[CASCADE DELETE] Removed ${deleteResult.deletedCount} calendar events associated with bid ${bidId}`);
+        } catch (cascadeErr) {
+            console.warn(`[CASCADE DELETE ERROR] Failed to remove calendar events for bid ${bidId}:`, cascadeErr.message);
+            // We don't fail the whole request because the bid is already gone
+        }
+
+        res.json({ message: 'Bid permanently deleted and associated events cleaned up' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -448,10 +547,35 @@ app.post('/api/audit', checkDbConnection, async (req, res) => {
 });
 
 // =============================================================================
-// Calendar Events Routes
+// No-Bid Reasons Routes
 // =============================================================================
 
-import { CalendarEvent } from './models/CalendarEvent.js';
+app.get('/api/no-bid-reasons', checkDbConnection, async (req, res) => {
+    try {
+        const reasons = await NoBidReason.find().sort({ createdAt: 1 }).lean();
+        res.json(reasons);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/no-bid-reasons', checkDbConnection, async (req, res) => {
+    try {
+        const { label } = req.body;
+        if (!label) return res.status(400).json({ error: 'Label is required' });
+        
+        const id = `nbr-${crypto.randomUUID()}`;
+        const newReason = new NoBidReason({ id, label });
+        await newReason.save();
+        res.status(201).json(newReason);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+// =============================================================================
+// Calendar Events Routes
+// =============================================================================
 
 app.get('/api/calendar-events', checkDbConnection, async (req, res) => {
     try {
@@ -468,6 +592,16 @@ app.post('/api/calendar-events', checkDbConnection, async (req, res) => {
         const event = new CalendarEvent(req.body);
         await event.save();
         res.status(201).json(event);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+app.put('/api/calendar-events/:id', checkDbConnection, async (req, res) => {
+    try {
+        const event = await CalendarEvent.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+        if (!event) return res.status(404).json({ error: 'Event not found' });
+        res.json(event);
     } catch (err) {
         res.status(400).json({ error: err.message });
     }

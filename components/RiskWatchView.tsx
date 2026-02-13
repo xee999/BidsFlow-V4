@@ -24,6 +24,7 @@ interface RiskWatchViewProps {
 
 const RiskWatchView: React.FC<RiskWatchViewProps> = ({ bids, onViewBid }) => {
   const [selectedRisk, setSelectedRisk] = useState<RiskLevel | 'All'>('All');
+  const [sortBy, setSortBy] = useState<'severity' | 'due' | 'value'>('severity');
 
   // Determine effective risk: if there are disqualifying factors, treat as HIGH
   const getEffectiveRisk = (bid: BidRecord) => {
@@ -31,11 +32,25 @@ const RiskWatchView: React.FC<RiskWatchViewProps> = ({ bids, onViewBid }) => {
     return bid.riskLevel;
   };
 
-  const filteredBids = bids.filter(b => {
-    const effRisk = getEffectiveRisk(b);
-    if (selectedRisk === 'All') return true;
-    return effRisk === selectedRisk;
-  });
+  const filteredBids = React.useMemo(() => {
+    let result = bids.filter(b => {
+      const effRisk = getEffectiveRisk(b);
+      if (selectedRisk === 'All') return true;
+      return effRisk === selectedRisk;
+    });
+
+    return result.sort((a, b) => {
+      if (sortBy === 'severity') {
+        const severityMap = { [RiskLevel.HIGH]: 3, [RiskLevel.MEDIUM]: 2, [RiskLevel.LOW]: 1 };
+        return severityMap[getEffectiveRisk(b)] - severityMap[getEffectiveRisk(a)];
+      } else if (sortBy === 'due') {
+        return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+      } else if (sortBy === 'value') {
+        return (b.tcvExclTax || b.estimatedValue || 0) - (a.tcvExclTax || a.estimatedValue || 0);
+      }
+      return 0;
+    });
+  }, [bids, selectedRisk, sortBy]);
 
   const counts = {
     [RiskLevel.HIGH]: bids.filter(b => getEffectiveRisk(b) === RiskLevel.HIGH).length,
@@ -86,8 +101,8 @@ const RiskWatchView: React.FC<RiskWatchViewProps> = ({ bids, onViewBid }) => {
         <p className="text-slate-500 mt-2 max-w-xl mx-auto font-medium">Strategic monitoring of all Jazz Business opportunities with integrated compliance disqualifiers and AI mitigation.</p>
       </div>
 
-      {/* Filters */}
-      <div className="flex justify-center mb-16">
+      {/* Filters & Sorting */}
+      <div className="flex flex-col items-center gap-6 mb-16">
         <div className="inline-flex gap-4 p-2 bg-white border border-slate-200 rounded-[2.5rem] shadow-xl">
           <button onClick={() => setSelectedRisk('All')} className={clsx("px-6 py-4 rounded-[2rem] text-xs font-black uppercase tracking-widest transition-all", selectedRisk === 'All' ? "bg-[#1E3A5F] text-white shadow-lg" : "text-slate-400 hover:bg-slate-50")}>All Bids ({counts['All']})</button>
           <div className="w-px bg-slate-100 my-2"></div>
@@ -98,6 +113,26 @@ const RiskWatchView: React.FC<RiskWatchViewProps> = ({ bids, onViewBid }) => {
             </button>
           ))}
         </div>
+
+        <div className="flex items-center gap-3 bg-slate-100/50 p-1 rounded-2xl border border-slate-100">
+           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-3 mr-2">Sort By:</span>
+           {[
+             { id: 'severity', label: 'Severity', icon: <ShieldAlert size={12} /> },
+             { id: 'due', label: 'Due Date', icon: <Clock size={12} /> },
+             { id: 'value', label: 'Value', icon: <CreditCard size={12} /> }
+           ].map(opt => (
+             <button
+               key={opt.id}
+               onClick={() => setSortBy(opt.id as any)}
+               className={clsx(
+                 "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                 sortBy === opt.id ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-400 hover:text-slate-600"
+               )}
+             >
+               {opt.icon} {opt.label}
+             </button>
+           ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-8 max-w-6xl mx-auto">
@@ -107,7 +142,13 @@ const RiskWatchView: React.FC<RiskWatchViewProps> = ({ bids, onViewBid }) => {
           return (
             <div key={bid.id} className={clsx("bg-white rounded-[40px] border shadow-sm overflow-hidden flex flex-col lg:flex-row transition-all hover:shadow-xl group", effectiveRisk === RiskLevel.HIGH ? "border-red-200" : effectiveRisk === RiskLevel.MEDIUM ? "border-amber-200" : "border-slate-200")}>
               <div className={clsx("lg:w-1/3 p-10 border-r border-slate-100", effectiveRisk === RiskLevel.HIGH ? "bg-red-50/20" : effectiveRisk === RiskLevel.MEDIUM ? "bg-amber-50/20" : "bg-slate-50/30")}>
-                <div className="flex justify-between items-start mb-8"><span className={clsx("px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border", effectiveRisk === RiskLevel.HIGH ? "bg-red-50 text-red-600 border-red-100" : effectiveRisk === RiskLevel.MEDIUM ? "bg-amber-50 text-amber-600 border-amber-100" : "bg-emerald-50 text-emerald-600 border-emerald-100")}>{effectiveRisk} PRIORITY</span><span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">STAGE: {bid.currentStage}</span></div>
+                <div className="flex justify-between items-start mb-8">
+                  <div className="flex flex-col gap-2">
+                    <span className={clsx("px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border", effectiveRisk === RiskLevel.HIGH ? "bg-red-50 text-red-600 border-red-100" : effectiveRisk === RiskLevel.MEDIUM ? "bg-amber-50 text-amber-600 border-amber-100" : "bg-emerald-50 text-emerald-600 border-emerald-100")}>{effectiveRisk} PRIORITY</span>
+                    <span className="px-2 py-0.5 bg-slate-100 text-slate-400 rounded text-[9px] font-bold uppercase tracking-widest w-fit">{bid.id}</span>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">STAGE: {bid.currentStage}</span>
+                </div>
                 <h3 className="text-2xl font-black text-slate-900 mb-3 leading-tight group-hover:text-[#D32F2F] transition-colors">{bid.projectName}</h3>
                 <p className="text-sm font-bold text-slate-400 mb-8 uppercase tracking-wide">{bid.customerName}</p>
                 <div className="space-y-4 mb-10">

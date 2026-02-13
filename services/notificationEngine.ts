@@ -21,6 +21,7 @@ const DAY = 24 * HOUR;
 
 interface NotificationEngineConfig {
     pollingIntervalMs: number;
+    currentUserId?: string;
     onNotificationCreated?: (notification: BidNotification) => void;
     onNavigateToBid?: (bidId: string) => void;
 }
@@ -127,6 +128,11 @@ class NotificationEngine {
         // Check stalled bids
         if (this.preferences.stageAlerts.stalledAlerts) {
             notifications.push(...this.checkStalledBids(bids, now));
+        }
+
+        // Check for mentions in notes
+        if (this.config.currentUserId) {
+            notifications.push(...this.checkNoteMentions(bids, now));
         }
 
         // Process notifications
@@ -318,6 +324,51 @@ class NotificationEngine {
                     });
                 }
             });
+
+        return notifications;
+    }
+
+    /**
+     * Check for mentions of the current user in all bid notes
+     */
+    private checkNoteMentions(bids: BidRecord[], now: Date): BidNotification[] {
+        const notifications: BidNotification[] = [];
+        const currentUserId = this.config.currentUserId;
+        if (!currentUserId) return [];
+
+        bids.forEach(bid => {
+            if (!bid.notes) return;
+
+            bid.notes.forEach(note => {
+                // If this note mentions the current user
+                if (note.mentionedUserIds?.includes(currentUserId)) {
+                    // And we didn't created it ourselves (optional, usually you don't notify yourself)
+                    // Note: note might not have creator ID, but we can check name if available
+                    // For now, focus on ID-based mention truth
+
+                    const notificationId = `mention-${currentUserId}-${note.id}`;
+
+                    // Check if already processed
+                    if (!this.sentNotifications.has(notificationId)) {
+                        notifications.push({
+                            id: notificationId,
+                            userId: currentUserId,
+                            type: NotificationType.MENTION,
+                            priority: 'high',
+                            title: `${note.createdBy || 'Someone'} mentioned you`,
+                            message: `You were mentioned in a note on "${bid.projectName}": "${note.content.slice(0, 50)}${note.content.length > 50 ? '...' : ''}"`,
+                            bidId: bid.id,
+                            bidName: bid.projectName,
+                            noteId: note.id,
+                            isRead: false,
+                            isDismissed: false,
+                            browserNotificationSent: false,
+                            createdAt: note.createdAt || now.toISOString()
+                        });
+                    }
+                }
+            });
+        });
 
         return notifications;
     }

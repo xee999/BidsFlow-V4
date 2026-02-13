@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 const BidSchema = new mongoose.Schema({
-    id: { type: String, required: true, unique: true },
+    id: { type: String, required: true, unique: true, trim: true },
     customerName: String,
     projectName: String,
     deadline: String,
@@ -24,6 +24,7 @@ const BidSchema = new mongoose.Schema({
     financialFormats: [mongoose.Schema.Types.Mixed],
     proposalSections: [mongoose.Schema.Types.Mixed],
     noBidReason: String,
+    noBidReasons: [String],
     noBidReasonCategory: String,
     noBidComments: String,
     competitionPricing: String,
@@ -62,6 +63,11 @@ const BidSchema = new mongoose.Schema({
     deliverablesSummary: [mongoose.Schema.Types.Mixed],
     integrityScoreBreakdown: mongoose.Schema.Types.Mixed,
     phaseTargets: mongoose.Schema.Types.Map,
+    notes: [mongoose.Schema.Types.Mixed],
+    jvAllowed: Boolean,
+    bidSecurityStatus: { type: String, enum: ['Pending', 'Raised', 'Ready'], default: 'Pending' },
+    bidSecurityRaisedDate: String,
+    bidSecurityReadyDate: String,
 }, { timestamps: true });
 
 // Add indexes for performance

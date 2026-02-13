@@ -35,6 +35,7 @@ const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateUser }) => {
     const [localName, setLocalName] = useState(currentUser.name);
     const [isSavingProfile, setIsSavingProfile] = useState(false);
     const [profileSuccess, setProfileSuccess] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const isAdmin = currentUser.role === 'SUPER_ADMIN';
@@ -74,28 +75,32 @@ const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateUser }) => {
 
     const [avatarError, setAvatarError] = useState<string | null>(null);
 
+    const processAvatar = (file: File) => {
+        setAvatarError(null);
+        if (file.size > 1024 * 1024) {
+            setAvatarError('File size must be less than 1MB');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const base64 = reader.result as string;
+            setCustomImage(base64);
+            onUpdateUser({
+                ...currentUser,
+                name: localName,
+                avatar: base64,
+                avatarType: 'image'
+            });
+        };
+        reader.readAsDataURL(file);
+    };
+
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        setAvatarError(null);
-
         if (file) {
-            if (file.size > 1024 * 1024) {
-                setAvatarError('File size must be less than 1MB');
-                return;
-            }
-
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64 = reader.result as string;
-                setCustomImage(base64);
-                onUpdateUser({
-                    ...currentUser,
-                    name: localName,
-                    avatar: base64,
-                    avatarType: 'image'
-                });
-            };
-            reader.readAsDataURL(file);
+            processAvatar(file);
+            e.target.value = '';
         }
     };
 
@@ -128,16 +133,31 @@ const Settings: React.FC<SettingsProps> = ({ currentUser, onUpdateUser }) => {
         if (isClickable) {
             return (
                 <div
-                    className="relative group cursor-pointer"
+                    className={clsx(
+                        "relative group cursor-pointer transition-all duration-300",
+                        isDragging && "scale-110 ring-4 ring-[#D32F2F] ring-offset-4"
+                    )}
                     onClick={() => fileInputRef.current?.click()}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+                    onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
+                    onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDragging(false);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) processAvatar(file);
+                    }}
                 >
                     {avatarContent}
                     <div className={clsx(
-                        "absolute inset-0 bg-white/80 backdrop-blur-[2px] flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-all text-slate-900",
-                        size === 'lg' ? 'rounded-3xl' : 'rounded-full'
+                        "absolute inset-0 bg-white/80 backdrop-blur-[2px] flex flex-col items-center justify-center transition-all text-slate-900",
+                        (size === 'lg' ? 'rounded-3xl' : 'rounded-full'),
+                        isDragging ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                     )}>
-                        <Upload size={size === 'lg' ? 24 : 16} className="mb-1" />
-                        {size === 'lg' && <span className="text-[10px] font-black uppercase tracking-widest">Edit</span>}
+                        <Upload size={size === 'lg' ? 24 : 16} className={clsx("mb-1", isDragging && "animate-bounce")} />
+                        <span className="text-[10px] font-black uppercase tracking-widest">
+                            {isDragging ? "Drop!" : "Edit"}
+                        </span>
                     </div>
                 </div>
             );

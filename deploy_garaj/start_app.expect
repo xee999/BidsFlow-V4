@@ -1,0 +1,57 @@
+#!/usr/bin/expect -f
+set timeout -1
+set ip [lindex $argv 0]
+set port [lindex $argv 1]
+set password [lindex $argv 2]
+set db_uri [lindex $argv 3]
+set jwt_secret [lindex $argv 4]
+
+spawn ssh -o StrictHostKeyChecking=no -p $port root@$ip
+expect {
+  "password:" { send "$password\r" }
+  "refused" { puts "Connection refused"; exit 1 }
+}
+expect -re "#"
+
+# Unzip and Install
+send "cd /var/www/bidsflow\r"
+expect -re "#"
+
+send "unzip -o bidsflow_dist.zip\r"
+expect -re "#"
+
+send "npm install --omit=dev\r"
+expect -re "#"
+
+# Build (might take time)
+send "npm run build\r"
+expect -re "#"
+
+# Create .env for survival but we will also pass them to PM2
+send "echo \"MONGODB_URI=$db_uri\" > .env\r"
+expect -re "#"
+send "echo \"PORT=3000\" >> .env\r"
+expect -re "#"
+send "echo \"JWT_SECRET=$jwt_secret\" >> .env\r"
+expect -re "#"
+send "echo \"API_KEY=AIzaSyAV_ctVvxoQspgpI7gT_4SponabYBtLxKQ\" >> .env\r"
+expect -re "#"
+send "echo \"GEMINI_API_KEY=AIzaSyAV_ctVvxoQspgpI7gT_4SponabYBtLxKQ\" >> .env\r"
+expect -re "#"
+send "echo \"ALLOWED_ORIGINS=*\" >> .env\r"
+expect -re "#"
+
+# Start App with PM2, passing env vars explicitly
+send "pm2 delete bidsflow || true\r"
+expect -re "#"
+# We wrap the command to ensure env vars are set
+send "MONGODB_URI='$db_uri' JWT_SECRET='$jwt_secret' PORT=3000 pm2 start server.js --name bidsflow\r"
+expect -re "#"
+
+send "pm2 save\r"
+expect -re "#"
+send "pm2 startup | tail -n 1 | bash\r"
+expect -re "#"
+
+send "exit\r"
+expect eof

@@ -13,7 +13,7 @@ import {
     Activity
 } from 'lucide-react';
 import { BidRecord, BidStatus, BidStage } from '../types.ts';
-import { STAGE_COLORS } from './ReportsView.tsx';
+import { STAGE_COLORS } from './reports/ReportHelpers.tsx';
 import { clsx } from 'clsx';
 import { sanitizeDateValue, calculateDaysInStages } from '../services/utils';
 

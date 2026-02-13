@@ -11,6 +11,7 @@ import { BidRecord, BidNote, CalendarEvent, User, BidStage, BidStatus } from '..
 import { clsx } from 'clsx';
 import { sanitizeDateValue } from '../services/utils';
 import MentionInput from './MentionInput';
+import RichText from './RichText';
 import { userService } from '../services/authService.ts';
 import { calendarApi } from '../services/api.ts';
 
@@ -60,7 +61,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     const [showNotePad, setShowNotePad] = useState<{ bidId: string, note?: BidNote } | null>(null);
     const [hoveredBid, setHoveredBid] = useState<{ bid: BidRecord, x: number, y: number } | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, date: string } | null>(null);
-    const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
     const [showAddEvent, setShowAddEvent] = useState<{ date: string, type?: 'note' | 'event' | 'reminder' } | null>(null);
     const [viewingEvent, setViewingEvent] = useState<CalendarEvent | null>(null);
     const [newEventTitle, setNewEventTitle] = useState('');
@@ -69,6 +69,11 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     const [allUsers, setAllUsers] = useState<User[]>([]);
     const [noteContent, setNoteContent] = useState('');
     const [noteMentionedUserIds, setNoteMentionedUserIds] = useState<string[]>([]);
+    const [noteTaggedBidIds, setNoteTaggedBidIds] = useState<string[]>([]);
+
+    const [eventDescription, setEventDescription] = useState('');
+    const [eventMentionedUserIds, setEventMentionedUserIds] = useState<string[]>([]);
+    const [eventTaggedBidIds, setEventTaggedBidIds] = useState<string[]>([]);
 
     // Fetch users for @mention dropdown
     useEffect(() => {
@@ -128,13 +133,13 @@ const CalendarView: React.FC<CalendarViewProps> = ({
 
     const eventsByDate = useMemo(() => {
         const map: Record<string, CalendarEvent[]> = {};
-        calendarEvents.forEach(event => {
+        events.forEach(event => {
             const date = event.date.split('T')[0];
             if (!map[date]) map[date] = [];
             map[date].push(event);
         });
         return map;
-    }, [calendarEvents]);
+    }, [events]);
 
     const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
     const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
@@ -160,18 +165,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({
         };
     }, [contextMenu]);
 
-    // Fetch events from backend
-    React.useEffect(() => {
-        const fetchEvents = async () => {
-            try {
-                const data = await calendarApi.getAll();
-                setCalendarEvents(data);
-            } catch (error) {
-                console.error("Failed to fetch events", error);
-            }
-        };
-        fetchEvents();
-    }, []);
 
     const handleAddCalendarEvent = async () => {
         if (!currentUser || !showAddEvent || !newEventTitle) return;
@@ -182,10 +175,13 @@ const CalendarView: React.FC<CalendarViewProps> = ({
             date: showAddEvent.date,
             type,
             color: type === 'note' ? '#FBBF24' : type === 'event' ? '#3B82F6' : '#EF4444',
-            createdBy: currentUser.name
+            createdBy: currentUser.name,
+            mentionedUserIds: eventMentionedUserIds,
+            taggedBidIds: eventTaggedBidIds,
+            description: eventDescription
         };
 
-        setCalendarEvents([...calendarEvents, newEvent]);
+        setEvents(prev => [...prev, newEvent]);
 
         try {
             await calendarApi.create(newEvent);
@@ -195,11 +191,14 @@ const CalendarView: React.FC<CalendarViewProps> = ({
 
         setShowAddEvent(null);
         setNewEventTitle('');
+        setEventDescription('');
+        setEventMentionedUserIds([]);
+        setEventTaggedBidIds([]);
     };
 
     const handleDeleteEvent = async () => {
         if (!viewingEvent || isViewer) return; // VIEWER users cannot delete
-        setCalendarEvents(prev => prev.filter(e => e.id !== viewingEvent.id));
+        setEvents(prev => prev.filter(e => e.id !== viewingEvent.id));
         setViewingEvent(null);
 
         try {
@@ -509,7 +508,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                                                 <Pin size={10} className="text-amber-400" />
                                                 <span className="text-[8px] font-bold text-amber-700/50">{note.createdBy}</span>
                                             </div>
-                                            <p className="text-[10px] font-semibold text-amber-900 leading-relaxed italic line-clamp-2">"{note.content}"</p>
+                                            <div className="text-[10px] font-semibold text-amber-900 leading-relaxed italic line-clamp-2">
+                                                <RichText text={note.content} bids={bids} onTagClick={onViewBid} />
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -526,16 +527,18 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                         <div className="bg-amber-50 w-80 min-h-[280px] p-6 shadow-2xl border border-amber-200 flex flex-col relative rounded-sm">
                             <div className="flex items-center justify-between mb-3">
                                 <span className="text-[9px] font-bold text-amber-800 uppercase tracking-widest flex items-center gap-1.5"><Pin size={12} /> {showNotePad.note ? 'Edit Note' : 'Post-it Note'}</span>
-                                <button onClick={() => { setShowNotePad(null); setNoteContent(''); setNoteMentionedUserIds([]); }} className="p-1 hover:bg-amber-200 rounded text-amber-800/40"><X size={16} /></button>
+                                <button onClick={() => { setShowNotePad(null); setNoteContent(''); setNoteMentionedUserIds([]); setNoteTaggedBidIds([]); }} className="p-1 hover:bg-amber-200 rounded text-amber-800/40"><X size={16} /></button>
                             </div>
                             <MentionInput
                                 value={noteContent || showNotePad.note?.content || ''}
-                                onChange={(value, userIds) => {
+                                onChange={(value, userIds, bidIds) => {
                                     setNoteContent(value);
                                     setNoteMentionedUserIds(userIds);
+                                    setNoteTaggedBidIds(bidIds);
                                 }}
                                 users={allUsers}
-                                placeholder="Type something... Use @ to mention team members"
+                                bids={bids}
+                                placeholder="Type something... Use @ for users, # for bids"
                                 autoFocus
                                 rows={6}
                                 className="flex-1 bg-transparent border-none text-amber-900 font-semibold text-sm leading-relaxed outline-none resize-none placeholder:text-amber-800/50"
@@ -550,7 +553,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
 
                                         if (showNotePad.note) {
                                             updatedNotes = updatedNotes.map(n =>
-                                                n.id === showNotePad.note!.id ? { ...n, content, mentionedUserIds: noteMentionedUserIds } : n
+                                                n.id === showNotePad.note!.id ? { ...n, content, mentionedUserIds: noteMentionedUserIds, taggedBidIds: noteTaggedBidIds } : n
                                             );
                                         } else {
                                             const newNote: BidNote = {
@@ -559,7 +562,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                                                 color: '#FEF3C7',
                                                 createdAt: new Date().toISOString(),
                                                 createdBy: currentUser.name,
-                                                mentionedUserIds: noteMentionedUserIds
+                                                mentionedUserIds: noteMentionedUserIds,
+                                                taggedBidIds: noteTaggedBidIds
                                             };
                                             updatedNotes = [...updatedNotes, newNote];
                                         }
@@ -580,10 +584,11 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                                     setShowNotePad(null);
                                     setNoteContent('');
                                     setNoteMentionedUserIds([]);
+                                    setNoteTaggedBidIds([]);
                                 }}
                             />
                             <div className="pt-3 border-t border-amber-800/10">
-                                <p className="text-[8px] text-amber-800 font-bold uppercase text-center opacity-40 italic">Hit enter to {showNotePad.note ? 'update' : 'pin'} note • Use @ to mention</p>
+                                <p className="text-[8px] text-amber-800 font-bold uppercase text-center opacity-40 italic">Hit enter to {showNotePad.note ? 'update' : 'pin'} note • Use @ for users, # for bids</p>
                             </div>
                         </div>
                     </div>
@@ -630,22 +635,28 @@ const CalendarView: React.FC<CalendarViewProps> = ({
 
                                 <div className="space-y-3">
                                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">Description / Title</label>
-                                    <textarea
-                                        autoFocus
-                                        className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 text-sm font-medium focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-50 transition-all outline-none resize-none placeholder:text-gray-400"
+                                    <MentionInput
+                                        value={eventDescription}
+                                        onChange={(value, userIds, bidIds) => {
+                                            setEventDescription(value);
+                                            setEventMentionedUserIds(userIds);
+                                            setEventTaggedBidIds(bidIds);
+                                            // Extract title from first line for the summary
+                                            const lines = value.split('\n');
+                                            setNewEventTitle(lines[0] || '');
+                                        }}
+                                        users={allUsers}
+                                        bids={bids}
                                         placeholder={showAddEvent.type === 'note' ? "Write your note here..." : "What is this event about?"}
+                                        autoFocus
                                         rows={4}
-                                        value={newEventTitle}
-                                        onChange={(e) => setNewEventTitle(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                e.preventDefault();
-                                                if (newEventTitle.trim()) handleAddCalendarEvent();
-                                            }
+                                        className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 text-sm font-medium focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-50 transition-all outline-none resize-none placeholder:text-gray-400"
+                                        onSubmit={() => {
+                                            if (eventDescription.trim()) handleAddCalendarEvent();
                                         }}
                                     />
                                     <div className="mt-2 flex justify-end px-1">
-                                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest opacity-60">Press enter to save</span>
+                                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest opacity-60">Press enter to save • Use @ for users, # for bids</span>
                                     </div>
                                 </div>
                             </div>
@@ -681,9 +692,16 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                             </div>
 
                             <div className="py-2">
-                                <p className="text-sm font-medium text-gray-600 bg-gray-50 p-3 rounded-xl border border-gray-100">
-                                    {viewingEvent.title}
-                                </p>
+                                <div className="text-sm font-medium text-gray-600 bg-gray-50 p-3 rounded-xl border border-gray-100 overflow-hidden">
+                                    <RichText
+                                        text={viewingEvent.description || viewingEvent.title}
+                                        bids={bids}
+                                        onTagClick={(id) => {
+                                            setViewingEvent(null);
+                                            onViewBid(id);
+                                        }}
+                                    />
+                                </div>
                             </div>
 
                             <div className="flex items-center justify-between pt-2 border-t border-gray-100 mt-2">

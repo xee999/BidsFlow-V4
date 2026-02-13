@@ -1,0 +1,61 @@
+#!/usr/bin/expect -f
+set ip [lindex $argv 0]
+set port [lindex $argv 1]
+set password [lindex $argv 2]
+set new_password [lindex $argv 3]
+set app_ip [lindex $argv 4]
+set prod_uri [lindex $argv 5]
+
+set timeout 20
+spawn ssh -o StrictHostKeyChecking=no -p $port root@$ip
+expect {
+  "password:" { 
+      send "$password\r" 
+      expect {
+          "Permission denied" { puts "Access denied"; exit 1 }
+          -re "#" { }
+          timeout { puts "Login prompt timeout"; exit 1 }
+      }
+  }
+  "refused" { puts "Connection refused"; exit 1 }
+  timeout { puts "SSH connect timeout"; exit 1 }
+}
+
+set timeout 900
+send "\r"
+expect -re "#"
+
+# Change Password
+send "echo \"root:$new_password\" | chpasswd\r"
+expect -re "#"
+
+# Set non-interactive
+send "export DEBIAN_FRONTEND=noninteractive\r"
+expect -re "#"
+
+# Provision MongoDB
+send "which mongod || (apt-get update && apt-get install -y gnupg curl && curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor --yes && echo \"deb \[ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg \] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse\" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list && apt-get update && apt-get install -y mongodb-org)\r"
+expect -re "#"
+
+# Bind IP
+send "sed -i 's/bindIp: 127.0.0.1/bindIp: 0.0.0.0/' /etc/mongod.conf && systemctl enable mongod && systemctl restart mongod\r"
+expect -re "#"
+
+# Migration (Pull from Prod)
+if {$prod_uri != ""} {
+    send "mongodump --uri=\"$prod_uri\" --gzip --archive=/root/migration.gzip && mongorestore --gzip --archive=/root/migration.gzip\r"
+    expect -re "#"
+    
+    # Create DB User
+    send "mongosh admin <<EOF
+use admin
+try {
+  db.createUser({ user: 'bidsflow_user', pwd: 'Smart@4ever', roles: \[{ role: 'readWrite', db: 'bidsflow' }\] })
+} catch (e) {}
+EOF
+\r"
+    expect -re "#"
+}
+
+send "exit\r"
+expect eof

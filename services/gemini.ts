@@ -3,8 +3,8 @@ import { GoogleGenerativeAI, SchemaType, GenerateContentResponse, Part, Content 
 const genAI = new GoogleGenerativeAI(process.env.API_KEY!);
 
 // Model configuration
-const PRIMARY_MODEL = 'gemini-2.5-pro';
-const FALLBACK_MODEL = 'gemini-2.5-flash';
+const PRIMARY_MODEL = 'gemini-2.0-flash';
+const FALLBACK_MODEL = 'gemini-2.0-flash';
 
 // Event for toast notifications (will be picked up by UI)
 export type AINotification = {

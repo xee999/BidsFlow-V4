@@ -5,11 +5,13 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-    BidNotification,
-    BidRecord,
     CalendarEvent,
     NotificationPreferences,
-    DEFAULT_NOTIFICATION_PREFERENCES
+    DEFAULT_NOTIFICATION_PREFERENCES,
+    User,
+    NotificationType,
+    BidRecord,
+    BidNotification
 } from '../types';
 import { createNotificationEngine, NotificationEngine } from './notificationEngine';
 import { browserNotifications } from './browserNotifications';
@@ -17,6 +19,7 @@ import { browserNotifications } from './browserNotifications';
 interface UseNotificationsOptions {
     bids: BidRecord[];
     calendarEvents: CalendarEvent[];
+    currentUser?: User | null;
     onNavigateToBid?: (bidId: string) => void;
     pollingIntervalMs?: number;
 }
@@ -58,7 +61,7 @@ const PREFS_STORAGE_KEY = 'bidsflow_notification_prefs';
 const MAX_NOTIFICATIONS = 50;
 
 export function useNotifications(options: UseNotificationsOptions): UseNotificationsReturn {
-    const { bids, calendarEvents, onNavigateToBid, pollingIntervalMs = 60000 } = options;
+    const { bids, calendarEvents, currentUser, onNavigateToBid, pollingIntervalMs = 60000 } = options;
 
     // State
     const [notifications, setNotifications] = useState<BidNotification[]>([]);
@@ -124,6 +127,7 @@ export function useNotifications(options: UseNotificationsOptions): UseNotificat
     useEffect(() => {
         engineRef.current = createNotificationEngine({
             pollingIntervalMs,
+            currentUserId: currentUser?.id,
             onNotificationCreated: handleNotificationCreated,
             onNavigateToBid
         });
@@ -217,6 +221,11 @@ export function useNotifications(options: UseNotificationsOptions): UseNotificat
         noteId: string,
         noteContent: string
     ) => {
+        // Only show notification if the current user is the one mentioned
+        if (!currentUser || mentionedUserId !== currentUser.id) {
+            return;
+        }
+
         const notification: BidNotification = {
             id: `mention-${mentionedUserId}-${noteId}`,
             userId: mentionedUserId,
@@ -249,13 +258,12 @@ export function useNotifications(options: UseNotificationsOptions): UseNotificat
         }
     }, [handleNotificationCreated, preferences.browserNotificationsEnabled, permissionStatus, onNavigateToBid]);
 
-    // Auto-start on mount
+    // Auto-start as soon as bids are available
     useEffect(() => {
-        if (bids.length > 0) {
+        if (bids.length > 0 && !isRunning) {
             start();
         }
-        return () => stop();
-    }, []); // Only run once on mount
+    }, [bids.length, isRunning, start]);
 
     return {
         notifications: notifications.filter(n => !n.isDismissed),

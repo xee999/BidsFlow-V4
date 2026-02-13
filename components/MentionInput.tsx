@@ -1,28 +1,27 @@
-/**
- * MentionInput Component
- * Textarea with @mention autocomplete functionality
- */
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
-import { User } from '../types';
+import { User, BidRecord } from '../types';
 
 interface MentionInputProps {
     value: string;
-    onChange: (value: string, mentionedUserIds: string[]) => void;
+    onChange: (value: string, mentionedUserIds: string[], taggedBidIds: string[]) => void;
     placeholder?: string;
     users: User[];
+    bids?: BidRecord[];
     onSubmit?: () => void;
     className?: string;
     autoFocus?: boolean;
     rows?: number;
 }
 
+type TriggerType = '@' | '#';
+
 const MentionInput: React.FC<MentionInputProps> = ({
     value,
     onChange,
-    placeholder = "Type something... Use @ to mention users",
+    placeholder = "Type something... Use @ for users, # for bids",
     users,
+    bids = [],
     onSubmit,
     className,
     autoFocus = false,
@@ -33,6 +32,7 @@ const MentionInput: React.FC<MentionInputProps> = ({
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [cursorPosition, setCursorPosition] = useState(0);
+    const [activeTrigger, setActiveTrigger] = useState<TriggerType | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +42,16 @@ const MentionInput: React.FC<MentionInputProps> = ({
         .filter(user =>
             user.name.toLowerCase().includes(searchQuery.toLowerCase())
         );
+
+    // Filter bids
+    const filteredBids = bids
+        .filter(bid =>
+            bid.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            bid.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            bid.customerName.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+
+    const filteredItems = activeTrigger === '#' ? filteredBids : filteredUsers;
 
     // Extract mentioned user IDs from text
     const extractMentionedUserIds = useCallback((text: string): string[] => {
@@ -62,6 +72,38 @@ const MentionInput: React.FC<MentionInputProps> = ({
         return [...new Set(mentions)];
     }, [users]);
 
+    // Extract tagged bid IDs from text
+    const extractTaggedBidIds = useCallback((text: string): string[] => {
+        if (!bids || bids.length === 0) return [];
+
+        const foundIds: string[] = [];
+
+        // 1. Match IDs (like #bid-123)
+        const idRegex = /#([\w-]+)/g;
+        let idMatch;
+        while ((idMatch = idRegex.exec(text)) !== null) {
+            const tagId = idMatch[1];
+            const bid = bids.find(b => b.id.toLowerCase() === tagId.toLowerCase());
+            if (bid) foundIds.push(bid.id);
+        }
+
+        // 2. Match Project Names (like #Project Name) - Case insensitive
+        // Sort bids by name length descending to handle overlapping names (e.g. "Apple" vs "Apple Pie")
+        const sortedBids = [...bids].sort((a, b) => (b.projectName?.length || 0) - (a.projectName?.length || 0));
+
+        sortedBids.forEach(bid => {
+            if (!bid.projectName) return;
+            const escapedName = bid.projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Look for # followed by the exact project name, ending at a space or end of string
+            const nameRegex = new RegExp(`#${escapedName}(?=\\s|$)`, 'gi');
+            if (nameRegex.test(text)) {
+                foundIds.push(bid.id);
+            }
+        });
+
+        return [...new Set(foundIds)];
+    }, [bids]);
+
     // Handle text change
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const newValue = e.target.value;
@@ -71,14 +113,21 @@ const MentionInput: React.FC<MentionInputProps> = ({
         // Check if we should show the dropdown
         const textBeforeCursor = newValue.slice(0, cursor);
         const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+        const lastHashIndex = textBeforeCursor.lastIndexOf('#');
 
-        if (lastAtIndex !== -1) {
-            const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1);
-            // Only show dropdown if there's no space after @ or if we're still typing a name
-            if (!textAfterAt.includes('\n') && textAfterAt.length <= 30) {
-                setSearchQuery(textAfterAt);
+        // Determine which trigger is more recent and valid
+        const triggerPos = Math.max(lastAtIndex, lastHashIndex);
+
+        if (triggerPos !== -1) {
+            const trigger = textBeforeCursor[triggerPos] as TriggerType;
+            const textAfterTrigger = textBeforeCursor.slice(triggerPos + 1);
+
+            // Only show dropdown if there's no space after trigger or if we're still typing a name
+            if (!textAfterTrigger.includes('\n') && !textAfterTrigger.includes(' ') && textAfterTrigger.length <= 30) {
+                setSearchQuery(textAfterTrigger);
                 setShowDropdown(true);
                 setSelectedIndex(0);
+                setActiveTrigger(trigger);
 
                 // Calculate dropdown position
                 if (textareaRef.current) {
@@ -89,42 +138,51 @@ const MentionInput: React.FC<MentionInputProps> = ({
 
                     setDropdownPosition({
                         top: (currentLine + 1) * lineHeight + 8,
-                        left: Math.min((lastAtIndex % 50) * 8, rect.width - 220)
+                        left: Math.min((triggerPos % 50) * 8, rect.width - 220)
                     });
                 }
             } else {
                 setShowDropdown(false);
+                setActiveTrigger(null);
             }
         } else {
             setShowDropdown(false);
+            setActiveTrigger(null);
         }
 
         const mentionedIds = extractMentionedUserIds(newValue);
-        onChange(newValue, mentionedIds);
+        const taggedIds = extractTaggedBidIds(newValue);
+        onChange(newValue, mentionedIds, taggedIds);
     };
 
     // Insert mention at cursor position
-    const insertMention = (user: User) => {
+    const insertItem = (item: User | BidRecord) => {
         if (!textareaRef.current) return;
+
+        const isBid = 'projectName' in item;
+        const trigger = isBid ? '#' : '@';
+        const displayValue = isBid ? (item as BidRecord).projectName : (item as User).name;
 
         const textBeforeCursor = value.slice(0, cursorPosition);
         const textAfterCursor = value.slice(cursorPosition);
-        const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+        const lastTriggerIndex = textBeforeCursor.lastIndexOf(trigger);
 
-        if (lastAtIndex !== -1) {
+        if (lastTriggerIndex !== -1) {
             const newValue =
-                textBeforeCursor.slice(0, lastAtIndex) +
-                `@${user.name} ` +
+                textBeforeCursor.slice(0, lastTriggerIndex) +
+                `${trigger}${displayValue} ` +
                 textAfterCursor;
 
             const mentionedIds = extractMentionedUserIds(newValue);
-            onChange(newValue, mentionedIds);
+            const taggedIds = extractTaggedBidIds(newValue);
+            onChange(newValue, mentionedIds, taggedIds);
             setShowDropdown(false);
+            setActiveTrigger(null);
 
             // Focus and set cursor after the mention
             setTimeout(() => {
                 if (textareaRef.current) {
-                    const newCursor = lastAtIndex + user.name.length + 2;
+                    const newCursor = lastTriggerIndex + displayValue.length + 2;
                     textareaRef.current.focus();
                     textareaRef.current.setSelectionRange(newCursor, newCursor);
                 }
@@ -134,22 +192,23 @@ const MentionInput: React.FC<MentionInputProps> = ({
 
     // Handle keyboard navigation
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (showDropdown && filteredUsers.length > 0) {
+        if (showDropdown && filteredItems.length > 0) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 setSelectedIndex(prev =>
-                    prev < filteredUsers.length - 1 ? prev + 1 : 0
+                    prev < filteredItems.length - 1 ? prev + 1 : 0
                 );
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 setSelectedIndex(prev =>
-                    prev > 0 ? prev - 1 : filteredUsers.length - 1
+                    prev > 0 ? prev - 1 : filteredItems.length - 1
                 );
             } else if (e.key === 'Enter' || e.key === 'Tab') {
                 e.preventDefault();
-                insertMention(filteredUsers[selectedIndex]);
+                insertItem(filteredItems[selectedIndex]);
             } else if (e.key === 'Escape') {
                 setShowDropdown(false);
+                setActiveTrigger(null);
             }
         } else if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -162,6 +221,7 @@ const MentionInput: React.FC<MentionInputProps> = ({
         const handleClickOutside = (e: MouseEvent) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
                 setShowDropdown(false);
+                setActiveTrigger(null);
             }
         };
 
@@ -197,65 +257,75 @@ const MentionInput: React.FC<MentionInputProps> = ({
                 )}
             />
 
-            {/* Mention Dropdown */}
-            {showDropdown && filteredUsers.length > 0 && (
+            {/* Dropdown */}
+            {showDropdown && filteredItems.length > 0 && (
                 <div
                     ref={dropdownRef}
-                    className="absolute bg-white rounded-xl shadow-2xl border border-gray-200 py-2 w-56 max-h-48 overflow-y-auto z-[10200]"
+                    className="absolute bg-white rounded-xl shadow-2xl border border-gray-200 py-2 w-72 max-h-64 overflow-y-auto z-[10200]"
                     style={{ top: dropdownPosition.top, left: dropdownPosition.left }}
                 >
-                    {filteredUsers.slice(0, 8).map((user, index) => (
-                        <button
-                            key={user.id}
-                            onClick={() => insertMention(user)}
-                            onMouseEnter={() => setSelectedIndex(index)}
-                            className={clsx(
-                                "w-full flex items-center gap-3 px-3 py-2 text-left transition-colors",
-                                index === selectedIndex
-                                    ? "bg-blue-50"
-                                    : "hover:bg-gray-50"
-                            )}
-                        >
-                            {/* Avatar */}
-                            <div className="w-8 h-8 rounded-full bg-[#1E3A5F] flex items-center justify-center text-white text-xs font-bold shrink-0">
-                                {user.avatarType === 'image' && user.avatar ? (
-                                    <img
-                                        src={user.avatar}
-                                        alt={user.name}
-                                        className="w-full h-full rounded-full object-cover"
-                                    />
-                                ) : (
-                                    user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+                    {filteredItems.slice(0, 8).map((item, index) => {
+                        const isBid = 'projectName' in item;
+                        const user = !isBid ? (item as User) : null;
+                        const bid = isBid ? (item as BidRecord) : null;
+
+                        return (
+                            <button
+                                key={item.id}
+                                onClick={() => insertItem(item)}
+                                onMouseEnter={() => setSelectedIndex(index)}
+                                className={clsx(
+                                    "w-full flex items-center gap-3 px-3 py-2 text-left transition-colors",
+                                    index === selectedIndex
+                                        ? "bg-blue-50"
+                                        : "hover:bg-gray-50"
                                 )}
-                            </div>
+                            >
+                                {isBid ? (
+                                    <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center text-red-600 text-xs font-bold shrink-0 border border-red-100">
+                                        BD
+                                    </div>
+                                ) : (
+                                    <div className="w-8 h-8 rounded-full bg-[#1E3A5F] flex items-center justify-center text-white text-xs font-bold shrink-0">
+                                        {user?.avatarType === 'image' && user?.avatar ? (
+                                            <img
+                                                src={user.avatar}
+                                                alt={user.name}
+                                                className="w-full h-full rounded-full object-cover"
+                                            />
+                                        ) : (
+                                            user?.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+                                        )}
+                                    </div>
+                                )}
 
-                            {/* User info */}
-                            <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-gray-900 truncate">
-                                    {user.name}
-                                </p>
-                                <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wide truncate">
-                                    {user.roleName || user.role?.replace(/_/g, ' ')}
-                                </p>
-                            </div>
-                        </button>
-                    ))}
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">
+                                        {isBid ? bid?.projectName : user?.name}
+                                    </p>
+                                    <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wide truncate">
+                                        {isBid ? `${bid?.id} • ${bid?.customerName}` : (user?.roleName || user?.role?.replace(/_/g, ' '))}
+                                    </p>
+                                </div>
+                            </button>
+                        );
+                    })}
 
-                    {filteredUsers.length > 8 && (
+                    {filteredItems.length > 8 && (
                         <div className="px-3 py-2 text-xs text-gray-400 text-center border-t border-gray-100 mt-1">
-                            +{filteredUsers.length - 8} more users
+                            +{filteredItems.length - 8} more items
                         </div>
                     )}
                 </div>
             )}
 
             {/* No results message */}
-            {showDropdown && filteredUsers.length === 0 && searchQuery.length > 0 && (
+            {showDropdown && filteredItems.length === 0 && searchQuery.length > 0 && (
                 <div
                     className="absolute bg-white rounded-xl shadow-lg border border-gray-200 py-3 px-4 w-56 z-[10200]"
                     style={{ top: dropdownPosition.top, left: dropdownPosition.left }}
                 >
-                    <p className="text-sm text-gray-500">No users found</p>
+                    <p className="text-sm text-gray-500">No {activeTrigger === '#' ? 'bids' : 'users'} found</p>
                 </div>
             )}
         </div>
