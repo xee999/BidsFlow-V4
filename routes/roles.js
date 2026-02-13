@@ -1,7 +1,7 @@
 import express from 'express';
 import { Role, seedBuiltInRoles } from '../models/Role.js';
 import { authMiddleware, roleCheck } from '../middleware/auth.js';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -62,7 +62,7 @@ router.post('/', roleCheck(['SUPER_ADMIN']), async (req, res) => {
         };
 
         const newRole = await Role.create({
-            id: `role-${uuidv4()}`,
+            id: `role-${crypto.randomUUID()}`,
             name: name.trim(),
             description: description || '',
             permissions: { ...defaultPermissions, ...permissions },
