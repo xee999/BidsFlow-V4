@@ -1,21 +1,24 @@
 #!/bin/bash
 set -e
 
-# This script deploys the application to the Google Cloud Test Server (formerly Production)
-echo "🚀 Preparing deployment to BidsFlow Test Server (Google Cloud)..."
+# This script deploys the application to the BidsFlow Test Server (VM)
+echo "🚀 Preparing deployment to BidsFlow Test Server (VM)..."
 
 ENV_FILE=".env.staging"
+VM_NAME="bidsflow-test-server"
+ZONE="us-central1-a"
 
 if [ ! -f "$ENV_FILE" ]; then
     echo "ERROR: Configuration file $ENV_FILE not found!"
     exit 1
 fi
 
-echo "🔍 Pre-flight check: Verifying environment variables in $ENV_FILE..."
+# Update MONGODB_URI to localhost for the VM deployment
+sed -i '' 's/@.*:27017/@127.0.0.1:27017/g' "$ENV_FILE"
 
+echo "🔍 Pre-flight check: Verifying environment variables in $ENV_FILE..."
 REQUIRED_VARS=("API_KEY" "GEMINI_API_KEY" "JWT_SECRET" "MONGODB_URI")
 MISSING=0
-
 for VAR in "${REQUIRED_VARS[@]}"; do
     if ! grep -q "^$VAR=" "$ENV_FILE"; then
         echo "❌ MISSING VARIABLE: $VAR"
@@ -28,24 +31,17 @@ if [ "$MISSING" -eq 1 ]; then
     exit 1
 fi
 
-echo "✅ Environment check passed."
+echo "🏗️ Building app..."
+npm run build
 
-# Project ID - BidsFlow Test Server
-PROJECT_ID="gen-lang-client-0197652040"
-REGION="us-central1"
-SERVICE_NAME="bidsflow-test-server"
+echo "📦 Packaging app..."
+zip -r bidsflow_test.zip dist server.js models routes middleware services package.json .env.staging
 
-echo "🚀 Deploying to Google Cloud (Project: $PROJECT_ID, Service: $SERVICE_NAME)..."
+echo "📤 Uploading to $VM_NAME..."
+gcloud compute scp bidsflow_test.zip root@$VM_NAME:/var/www/bidsflow/ --zone=$ZONE --quiet
 
-# Construct env vars string
-ENV_VARS=$(paste -sd, "$ENV_FILE")
-
-gcloud run deploy "$SERVICE_NAME" \
-    --project "$PROJECT_ID" \
-    --region "$REGION" \
-    --source . \
-    --set-env-vars "$ENV_VARS" \
-    --allow-unauthenticated
+echo "⚡ Starting app on $VM_NAME..."
+gcloud compute ssh root@$VM_NAME --zone=$ZONE --command="cd /var/www/bidsflow && unzip -o bidsflow_test.zip && npm install --production && pm2 delete bidsflow || true && pm2 start server.js --name bidsflow --env .env.staging" --quiet
 
 echo "✅ Deployment complete."
-echo "Access the test server here: https://bidsflow-test-server-661116307651.us-central1.run.app"
+echo "Access the test server here: http://34.172.151.20"

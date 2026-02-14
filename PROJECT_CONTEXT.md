@@ -93,7 +93,7 @@ The application follows a dual-cloud strategy for production and testing:
 | Environment | Platform | Purpose | Deployment Command |
 | :--- | :--- | :--- | :--- |
 | **Production** | **Garaj Cloud** | Primary customer-facing application. | `npm run deploy:prod` |
-| **Test Server** | **Google Cloud** | Sandbox for new features/testing (formerly Prod). | `npm run deploy:test` |
+| **Test Server** | **Google Cloud** | Unified VM hosting both App & DB. | `npm run deploy:test` |
 | **Staging** | **Google Cloud** | Pre-production validation. | (via gcloud script) |
 
 - **Project ID (GCP)**: `gen-lang-client-0197652040` (Renamed to "BidsFlow Test Server")
