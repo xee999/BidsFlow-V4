@@ -287,6 +287,41 @@ const App: React.FC = () => {
     addAuditLog(log);
   }, [addAuditLog]);
 
+  // HIGH-007: Inactivity Timeout (30 mins per ISG mandate)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let timeoutId: NodeJS.Timeout;
+    const TIMEOUT_DURATION = 30 * 60 * 1000; // 30 minutes
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        // Enforce logout
+        console.warn('Inactivity timeout reached. Logging out.');
+        handleLogout();
+        alert('Your session has expired due to 30 minutes of inactivity. Please log in again.');
+      }, TIMEOUT_DURATION);
+    };
+
+    // Events to track user activity
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    
+    activityEvents.forEach(event => {
+      document.addEventListener(event, resetTimer);
+    });
+
+    // Initial start
+    resetTimer();
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      activityEvents.forEach(event => {
+        document.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [currentUser]);
+
   const handleNavigateToFilter = (status: string) => {
     setInitialStatusFilter(status);
     setActiveTab('all-bids');

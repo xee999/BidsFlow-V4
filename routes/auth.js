@@ -76,14 +76,14 @@ router.post('/login', loginLimiter, async (req, res) => {
         }
 
         const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, {
-            expiresIn: '24h',
+            expiresIn: '30m',
         });
 
         res.cookie('token', token, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'strict',
-            maxAge: 24 * 60 * 60 * 1000, // 24 hours
+            maxAge: 30 * 60 * 1000, // 30 minutes
         });
 
         const userWithRole = await getUserWithRole(user);

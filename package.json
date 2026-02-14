@@ -10,7 +10,8 @@
     "server": "tsx --env-file=.env server.js",
     "start": "node --env-file=.env server.js",
     "deploy:prod": "./deploy_garaj/go_garaj.sh",
-    "deploy:code": "./deploy_garaj/deploy_code_only.sh"
+    "deploy:code": "./deploy_garaj/deploy_code_only.sh",
+    "deploy:test": "./scripts/deploy_test_server.sh"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
@@ -27,6 +28,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "^0.446.0",
     "mongoose": "^9.1.5",
+    "pdf-lib": "^1.17.1",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

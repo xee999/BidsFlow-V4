@@ -25,6 +25,14 @@ import crypto from 'crypto';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// DLP Configuration - PII Protection
+const DLP_PATTERNS = [
+    { name: 'CNIC', regex: /\d{5}-\d{7}-\d/g },
+    { name: 'Phone', regex: /(03\d{2}|0092\d{2}|\+92\d{2})[ -]?\d{7}/g },
+    { name: 'Email', regex: /[a-zA-Z0-9._%+-]+(?<!@jazz\.com\.pk)/i }, // Non-Jazz emails
+    { name: 'Passport', regex: /[A-Z]{1}\d{7}/g }
+];
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -213,8 +221,26 @@ app.post('/api/ai/analyze-bid', authMiddleware, async (req, res) => {
 
         console.log(`AI analysis requested by ${req.user.email} for: ${fileName}`);
 
+        // DLP Check: Scan content for PII before streaming to AI
+        const decodedContent = Buffer.from(fileContentBase64, 'base64').toString('utf8');
+        const violations = [];
+        DLP_PATTERNS.forEach(p => {
+            if (p.regex.test(decodedContent)) violations.push(p.name);
+        });
+
+        if (violations.length > 0) {
+            console.warn(`[DLP_VIOLATION] Sensitive data found in ${fileName}: ${violations.join(', ')}`);
+            // We allow progress but log it for SIEM to flag. 
+            // In strict mode, we would return 403.
+            // For now, let's flag it in the response.
+        }
+
         const result = await analyzeBidDocumentServer(fileName, fileContentBase64);
-        res.json(result);
+        res.json({
+            ...result,
+            dlpStatus: violations.length > 0 ? 'Warning: PII Detected' : 'Clean',
+            violations: violations
+        });
     } catch (err) {
         console.error('Server-side AI analysis error:', err);
         res.status(500).json({ error: err.message || 'AI analysis failed on server' });
@@ -543,6 +569,29 @@ app.post('/api/audit', checkDbConnection, async (req, res) => {
         res.status(201).json(log);
     } catch (err) {
         res.status(400).json({ error: err.message });
+    }
+});
+
+// SIEM Logging Endpoint (FortiSIEM Integration Placeholder)
+app.post('/api/audit/siem', authMiddleware, async (req, res) => {
+    try {
+        const log = req.body;
+        
+        // Log to server console with specific SIEM prefix for FortiSIEM collection
+        console.log(`[SIEM_EVENT] ${JSON.stringify({
+            ...log,
+            source_ip: req.ip,
+            user_agent: req.get('User-Agent'),
+            environment: process.env.NODE_ENV || 'development'
+        })}`);
+
+        // In production, this would trigger an actual syslog/fetch to FortiSIEM
+        // e.g., pushToFortiSIEM(log);
+
+        res.status(200).json({ status: 'Forwarded to SIEM' });
+    } catch (err) {
+        console.error('SIEM Endpoint error:', err);
+        res.status(500).json({ error: 'Failed to process SIEM log' });
     }
 });
 

@@ -50,7 +50,7 @@ export interface AuditLogParams {
 
 // Create activity log entry
 export const createAuditLog = (params: AuditLogParams): ActivityLog => {
-    return {
+    const log = {
         id: generateId(),
         userName: params.userName,
         userRole: params.userRole,
@@ -65,6 +65,29 @@ export const createAuditLog = (params: AuditLogParams): ActivityLog => {
         previousValue: params.previousValue,
         newValue: params.newValue,
     };
+
+    // Push to SIEM asynchronously
+    pushToSIEM(log).catch(err => console.error('SIEM logging failed:', err));
+    
+    return log;
+};
+
+// Push logs to server-side SIEM endpoint
+export const pushToSIEM = async (log: ActivityLog): Promise<void> => {
+    try {
+        const response = await fetch('/api/audit/siem', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(log)
+        });
+        if (!response.ok) {
+            throw new Error(`SIEM log failed: ${response.statusText}`);
+        }
+    } catch (error) {
+        // Fallback or silent fail as per enterprise logging guidelines
+        // We log to console but don't disrupt user flow
+        console.warn('SIEM Forwarding error:', error);
+    }
 };
 
 // Pre-defined log creators for common actions

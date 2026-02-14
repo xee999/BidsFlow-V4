@@ -37,6 +37,11 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isCollapsed,
         )}>
           Bids<span className="text-[#D32F2F]">Flow</span>
         </h1>
+        {import.meta.env.VITE_APP_ENV_NAME && !isCollapsed && (
+          <div className="mt-1 px-2 py-0.5 bg-amber-500/20 border border-amber-500/30 rounded text-[9px] font-black text-amber-400 uppercase tracking-widest animate-pulse">
+            {import.meta.env.VITE_APP_ENV_NAME}
+          </div>
+        )}
         {!isCollapsed && (
           <p className="text-[10px] text-slate-400 mt-2 text-center uppercase font-bold tracking-widest border-t border-white/10 pt-2 w-full animate-in fade-in">
             Jazz Business Studio

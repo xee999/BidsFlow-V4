@@ -16,7 +16,7 @@ import JSZip from 'jszip';
 import { analyzePricingDocument, analyzeComplianceDocuments, generateFinalRiskAssessment, generateStrategicRiskAssessment, analyzeSolutioningDocuments, analyzeBidSecurityDocument, tagTechnicalDocuments, analyzeBidDocument } from '../services/gemini.ts';
 import FloatingAIChat from './FloatingAIChat.tsx';
 import { clsx } from 'clsx';
-import { auditActions } from '../services/auditService.ts';
+import { auditActions, createAuditLog } from '../services/auditService.ts';
 import BidLifecycleSidebar from './bid-lifecycle/BidLifecycleSidebar';
 import BidLifecycleHeader from './bid-lifecycle/BidLifecycleHeader';
 import NoBidModal from './bid-lifecycle/NoBidModal';
@@ -25,6 +25,7 @@ import DeleteAssetModal from './bid-lifecycle/DeleteAssetModal';
 import MentionInput from './MentionInput';
 import RichText from './RichText';
 import { userService } from '../services/authService.ts';
+import { documentSecurity } from '../services/documentSecurity.ts';
 
 interface BidLifecycleProps {
   bid: BidRecord;
@@ -733,14 +734,46 @@ const BidLifecycle: React.FC<BidLifecycleProps> = ({ bid, onUpdate, onClose, use
     }
   };
 
-  const handleDownload = (doc: TechnicalDocument) => {
+  const handleDownload = async (doc: TechnicalDocument) => {
     if (!doc.fileData) return alert("Binary missing.");
-    const link = document.createElement('a');
-    link.href = `data:application/pdf;base64,${doc.fileData}`;
-    link.download = doc.name;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    
+    // Log download attempt
+    if (addAuditLog && currentUser) {
+      addAuditLog(createAuditLog({
+        userName: currentUser.name,
+        userRole: currentUser.role as any,
+        action: 'Download',
+        target: doc.name,
+        subText: `Downloaded ${doc.name} (Watermarked)`,
+        changeType: 'document_upload', // Use appropriate type or add new one
+        bidId: bid.id,
+        projectName: bid.projectName
+      }));
+    }
+
+    try {
+      let finalData: string | Uint8Array = doc.fileData;
+      
+      // If PDF, apply watermark
+      if (doc.type === 'PDF' || doc.name.toLowerCase().endsWith('.pdf')) {
+        const binaryData = Uint8Array.from(atob(doc.fileData), c => c.charCodeAt(0));
+        const watermarkedPdf = await documentSecurity.applyWatermark(binaryData.buffer, currentUser?.name || 'Authorized User');
+        finalData = watermarkedPdf;
+      }
+
+      const blob = new Blob([finalData as any], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = doc.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (error) {
+      console.error('Download failed:', error);
+      alert('Secure download failed. Please contact IT.');
+    }
   };
 
   const handleDeleteAsset = () => {

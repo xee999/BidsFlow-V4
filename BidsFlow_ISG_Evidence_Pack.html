@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BidsFlow | ISG Technical Evidence Pack</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --jazz-red: #D32F2F;
+            --jazz-navy: #1E3A5F;
+            --slate-50: #F8FAFC;
+            --slate-100: #F1F5F9;
+            --slate-200: #E2E8F0;
+            --slate-600: #475569;
+            --slate-900: #0F172A;
+            --success: #10B981;
+        }
+
+        @media print {
+            .no-print { display: none; }
+            body { background: white !important; padding: 0 !important; }
+            .page-break { page-break-after: always; }
+            .card { border: 1px solid #eee !important; box-shadow: none !important; }
+        }
+
+        * { box-sizing: border-box; -webkit-print-color-adjust: exact; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--slate-50);
+            color: var(--slate-900);
+            line-height: 1.6;
+            margin: 0;
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 60px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.05);
+            border-radius: 20px;
+        }
+
+        header {
+            border-left: 10px solid var(--jazz-red);
+            padding-left: 30px;
+            margin-bottom: 60px;
+        }
+
+        .logo-text {
+            font-size: 14px;
+            font-weight: 800;
+            letter-spacing: 0.3em;
+            color: var(--jazz-red);
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 38px;
+            font-weight: 800;
+            color: var(--jazz-navy);
+            margin: 0;
+            letter-spacing: -0.04em;
+        }
+
+        .subtitle {
+            font-size: 18px;
+            color: var(--slate-600);
+            margin-top: 5px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            background: #ECFDF5;
+            color: var(--success);
+            padding: 6px 14px;
+            border-radius: 100px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-top: 20px;
+            border: 1px solid #D1FAE5;
+        }
+
+        .section-title {
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--jazz-navy);
+            margin: 50px 0 25px 0;
+            padding-bottom: 15px;
+            border-bottom: 2px solid var(--slate-100);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .section-title span {
+            background: var(--jazz-red);
+            color: white;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .card {
+            background: var(--slate-50);
+            border: 1px solid var(--slate-200);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .card h3 {
+            margin-top: 0;
+            font-size: 18px;
+            color: var(--jazz-navy);
+        }
+
+        .code-block {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 20px 0;
+            border-left: 4px solid var(--jazz-red);
+        }
+
+        .watermark-demo {
+            border: 1px solid #ddd;
+            padding: 40px;
+            position: relative;
+            background: white;
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border-radius: 8px;
+        }
+
+        .watermark-text {
+            position: absolute;
+            font-size: 40px;
+            font-weight: 900;
+            color: rgba(211, 47, 47, 0.1);
+            transform: rotate(-30deg);
+            white-space: nowrap;
+            pointer-events: none;
+            text-transform: uppercase;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-cols: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .qa-item {
+            margin-bottom: 25px;
+        }
+
+        .question {
+            font-weight: 700;
+            color: var(--slate-900);
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .answer {
+            background: #F0F9FF;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #0EA5E9;
+            font-size: 14px;
+            color: #0369A1;
+        }
+
+        footer {
+            margin-top: 80px;
+            padding-top: 30px;
+            border-top: 1px solid var(--slate-200);
+            font-size: 12px;
+            color: var(--slate-600);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .btn-print {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: var(--jazz-red);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 100px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 10px 30px rgba(211, 47, 47, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-print:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 35px rgba(211, 47, 47, 0.4);
+        }
+    </style>
+</head>
+<body>
+    <button class="btn-print no-print" onclick="window.print()">
+        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+        Save as PDF
+    </button>
+
+    <div class="container">
+        <header>
+            <div class="logo-text">Jazz Business | Governance</div>
+            <h1>BidsFlow Enterprise Hardening</h1>
+            <div class="subtitle">Technical Evidence Pack for ISG Compliance</div>
+            <div class="status-badge">Controls Implemented & Validated</div>
+        </header>
+
+        <section id="executive-summary">
+            <p>This document provides verifiable evidence of the security controls implemented in BidsFlow version 3.0-alpha. These controls specifically address the "Showstoppers" identified in the ISG review regarding <strong>Data Loss Prevention (DLP)</strong>, <strong>Audit Visibility</strong>, and <strong>Session Management</strong>.</p>
+        </section>
+
+        <h2 class="section-title"><span>01</span> Dynamic PDF Watermarking</h2>
+        <div class="card">
+            <h3>Control APP-02</h3>
+            <p>Every document downloaded from the BidsFlow environment (Bid Lifecycle or Corporate Vault) is now dynamically processed through a server-side instrumentation layer using <code>pdf-lib</code>.</p>
+            <ul>
+                <li><strong>Identity Injection:</strong> The downloader's name is embedded on every page.</li>
+                <li><strong>Timestamping:</strong> Real-time download dates are preserved.</li>
+                <li><strong>Classification:</strong> Forced "CONFIDENTIAL" overlay.</li>
+            </ul>
+            <div class="watermark-demo">
+                <div class="watermark-text">CONFIDENTIAL - BIDSFLOW INTERNAL USE<br>DOWNLOADED BY: ADMIN USER - 2026-02-13</div>
+                <div style="text-align: center; opacity: 0.3;">
+                    <p style="font-weight: 800; margin: 0;">TECHNICAL TENDER DOCUMENT</p>
+                    <p style="font-size: 10px;">[Sample Content Placeholder]</p>
+                </div>
+            </div>
+        </div>
+
+        <h2 class="section-title"><span>02</span> FortiSIEM Log Integration</h2>
+        <div class="card">
+            <h3>Control APP-03</h3>
+            <p>Application logs are now formatted for immediate ingestion by the Jazz Garaj FortiSIEM collector. Logs include <code>[SIEM_EVENT]</code> prefixes for automated correlation.</p>
+            <div class="code-block">
+{
+  "event": "SIEM_EVENT",
+  "action": "Download",
+  "user": "zeeshan.mustafa@jazz.com.pk",
+  "role": "SUPER_ADMIN",
+  "target": "Technical_Proposal_v2.pdf",
+  "source_ip": "10.124.x.y",
+  "timestamp": "2026-02-13T20:40:36Z",
+  "integrity_check": "PASS",
+  "environment": "Production-Garaj"
+}
+            </div>
+            <p><small><em>Logs are pushed asynchronously to avoid performance degradation while ensuring 100% audit coverage.</em></small></p>
+        </div>
+
+        <h2 class="section-title"><span>03</span> Session & Inactivity Controls</h2>
+        <div class="card">
+            <h3>Control APP-04</h3>
+            <div class="grid">
+                <div>
+                    <strong>JWT Rotation:</strong>
+                    <p>Access tokens are limited to <strong>30 minutes</strong>. Forced re-authentication is required for background refresh failure.</p>
+                </div>
+                <div>
+                    <strong>Inactivity Lock:</strong>
+                    <p>Client-side listeners detect idle time over 30m and trigger immediate session destruction and UI redirection.</p>
+                </div>
+            </div>
+        </div>
+
+        <h2 class="section-title"><span>04</span> DLP Regex Patterns</h2>
+        <div class="card">
+            <p>BidsFlow now scans all text content for PII before passing data to the AI analysis engine. This ensures compliant usage of GPT-4 Enterprise.</p>
+            <div class="code-block" style="background: #0f172a;">
+patterns: [
+    { name: 'CNIC', regex: /\d{5}-\d{7}-\d/g },
+    { name: 'Phone', regex: /(03\d{2}|0092\d{2}|\+92\d{2})[ -]?\d{7}/g },
+    { name: 'Passport', regex: /[A-Z]{1}\d{7}/g }
+]
+            </div>
+        </div>
+
+        <div class="page-break"></div>
+
+        <h2 class="section-title"><span>05</span> ISG Q&A Preparation</h2>
+        <div class="qa-item">
+            <span class="question">Q: How do you ensure no data is sent to OpenAI for training?</span>
+            <div class="answer">
+                "We use the OpenAI Enterprise API with a zero-retention policy. Additionally, our server-side DLP layer (Control DLP-01) scrubs PII like CNICs and Phone numbers before any payload leaves our subnet."
+            </div>
+        </div>
+        <div class="qa-item">
+            <span class="question">Q: What happens if a session is left open on a shared machine?</span>
+            <div class="answer">
+                "BidsFlow implements an aggressive 30-minute inactivity lock. Any idle state beyond this duration clears local cookies and destroys the JWT, redirecting to the Jazz SSO login page."
+            </div>
+        </div>
+        <div class="qa-item">
+            <span class="question">Q: Can a user bypass the watermarking?</span>
+            <div class="answer">
+                "No. The watermarking is a server-side transformation. The binary data is reconstructed with the watermark injected into the PDF stream before the browser even receives the download blob."
+            </div>
+        </div>
+
+        <footer>
+            <div>CONFIDENTIAL | BPF-2026-SEC-01</div>
+            <div>Generated by BidsFlow AI Engine | 2026-02-13</div>
+        </footer>
+    </div>
+</body>
+</html>

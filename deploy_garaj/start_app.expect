@@ -20,7 +20,11 @@ expect -re "#"
 send "unzip -o bidsflow_dist.zip\r"
 expect -re "#"
 
-send "npm install --omit=dev\r"
+send "npm install\r"
+expect -re "#"
+
+# Clear old build to ensure fresh build
+send "rm -rf dist\r"
 expect -re "#"
 
 # Build (might take time)

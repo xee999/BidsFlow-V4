@@ -14,6 +14,8 @@ import {
 import { TechnicalDocument } from '../types.ts';
 import { indexVaultDocument } from '../services/gemini.ts';
 import { vaultApi } from '../services/api.ts';
+import { auditActions, createAuditLog } from '../services/auditService.ts';
+import { documentSecurity } from '../services/documentSecurity.ts';
 import { clsx } from 'clsx';
 
 const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; userRole?: string }> = ({ assets, setAssets, userRole }) => {
@@ -169,6 +171,48 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; us
       setViewingAsset(asset);
     } finally {
       setIsIndexing(false);
+    }
+  };
+
+  const handleDownload = async (doc: TechnicalDocument) => {
+    if (!doc.fileData) return alert("Binary missing.");
+    
+    // Log download attempt
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('bidsflow_user') || '{}');
+      
+      const log = createAuditLog({
+        userName: currentUser.name || 'Unknown User',
+        userRole: (currentUser.role as any) || 'VIEWER',
+        action: 'Vault Download',
+        target: doc.name,
+        subText: `Downloaded ${doc.name} from Corporate Vault (Watermarked)`,
+        changeType: 'document_upload',
+      });
+      // We don't have addAuditLog passed in here like in BidLifecycle, 
+      // but createAuditLog now pushes to SIEM internally.
+      
+      let finalData: string | Uint8Array = doc.fileData;
+      
+      // If PDF, apply watermark
+      if (doc.type === 'PDF' || doc.name.toLowerCase().endsWith('.pdf')) {
+        const binaryData = Uint8Array.from(atob(doc.fileData), c => c.charCodeAt(0));
+        const watermarkedPdf = await documentSecurity.applyWatermark(binaryData.buffer, currentUser?.name || 'Authorized User');
+        finalData = watermarkedPdf;
+      }
+
+      const blob = new Blob([finalData as any], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = doc.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (error) {
+      console.error('Vault download failed:', error);
+      alert('Secure download failed.');
     }
   };
 
@@ -466,7 +510,10 @@ const CorporateVault: React.FC<{ assets: TechnicalDocument[]; setAssets: any; us
             </div>
 
             <div className="flex gap-4 relative z-10 border-t border-slate-100 pt-10">
-              <button className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all flex items-center justify-center gap-3 shadow-sm">
+              <button 
+                onClick={() => handleDownload(viewingAsset)}
+                className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-100 transition-all flex items-center justify-center gap-3 shadow-sm"
+              >
                 <Download size={18} /> Download
               </button>
               {userRole !== 'VIEWER' && (

@@ -231,9 +231,45 @@ export const calculateDaysInStages = (receivedDate: string, stageHistory: StageT
     const now = new Date().getTime();
     const diffDaysNow = Math.max(0.1, parseFloat(((now - start) / (1000 * 60 * 60 * 24)).toFixed(1)));
 
-    // Safety check: if currentStage in record doesn't match last entry in history, treat last history as active
     const activeStage = currentStage || lastEntry.stage;
     days[activeStage] = (days[activeStage] || 0) + diffDaysNow;
 
     return days;
+};
+
+/**
+ * Formats a number as a currency string with commas.
+ */
+export const formatCurrency = (value: number): string => {
+    return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    }).format(value);
+};
+/**
+ * Simple DLP scanner to detect sensitive patterns in text before AI processing.
+ * Currently checks for common PII patterns like CNICs and Phone Numbers.
+ */
+export const dlpScanner = {
+    scanText: (text: string): { matches: string[]; safe: boolean } => {
+        const patterns = [
+            { name: 'CNIC', regex: /\d{5}-\d{7}-\d/g },
+            { name: 'Phone Number', regex: /(03\d{2}|0092\d{2}|\+92\d{2})[ -]?\d{7}/g },
+            { name: 'Email Address', regex: /[a-zA-Z0-9._%+-]+@jazz\.com\.pk/i, invert: true }, // Allow jazz.com.pk, block others
+            { name: 'Passport Number', regex: /[A-Z]{1}\d{7}/g }
+        ];
+
+        const matches: string[] = [];
+        patterns.forEach(p => {
+            const found = text.match(p.regex);
+            if (found && !p.invert) {
+                matches.push(`${p.name} found: ${found.length} occurrence(s)`);
+            }
+        });
+
+        return {
+            matches,
+            safe: matches.length === 0
+        };
+    }
 };
