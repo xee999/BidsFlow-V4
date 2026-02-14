@@ -86,7 +86,23 @@ BidsFlow is a sophisticated **Bid Management & Governance System** built for hig
 
 ---
 
-## 5. Recent Version History (Log)
+## 5. Infrastructure & Deployment
+
+The application follows a dual-cloud strategy for production and testing:
+
+| Environment | Platform | Purpose | Deployment Command |
+| :--- | :--- | :--- | :--- |
+| **Production** | **Garaj Cloud** | Primary customer-facing application. | `npm run deploy:prod` |
+| **Test Server** | **Google Cloud** | Sandbox for new features/testing (formerly Prod). | `npm run deploy:test` |
+| **Staging** | **Google Cloud** | Pre-production validation. | (via gcloud script) |
+
+- **Project ID (GCP)**: `gen-lang-client-0197652040` (Renamed to "BidsFlow Test Server")
+- **Containerization**: Docker-based deployment on both platforms.
+- **Database**: MongoDB (Atlas or self-hosted depending on environment).
+
+---
+
+## 6. Recent Version History (Log)
 
 | Feature | Details | Status |
 | :--- | :--- | :--- |
@@ -96,6 +112,8 @@ BidsFlow is a sophisticated **Bid Management & Governance System** built for hig
 | **Crash Fixes** | Fixed `ReportsView` null pointer exceptions on missing integrity breakdown data. | ✅ Deployed |
 | **Dashboard** | Logic update: Show bids due *from tomorrow onwards* only. | ✅ Deployed |
 | **Data Sync** | Excel ingestion of 139 historic bids with accurate "days in stage" calculation. | ✅ Deployed |
+| **Code Cleanup** | Removed 191 unused dependencies and organized root directory scripts. | ✅ Deployed |
+| **Server Repurposing**| Google Cloud Production renamed to "BidsFlow Test Server"; Garaj promoted to Prod. | ✅ Live |
 
 ---
 
